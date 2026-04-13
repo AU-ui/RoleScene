@@ -8,7 +8,6 @@ const DB_PATH = path.join(__dirname, '..', 'rolescene.db');
 
 export const db = new Database(DB_PATH);
 
-// WAL mode: better concurrent read performance
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
@@ -16,14 +15,17 @@ db.pragma('foreign_keys = ON');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
-    id              TEXT    PRIMARY KEY,
-    email           TEXT    UNIQUE NOT NULL,
-    password_hash   TEXT    NOT NULL,
-    display_name    TEXT    NOT NULL,
-    role            TEXT    NOT NULL DEFAULT 'user',
-    login_attempts  INTEGER NOT NULL DEFAULT 0,
-    locked_until    INTEGER NOT NULL DEFAULT 0,
-    created_at      INTEGER DEFAULT (unixepoch())
+    id                  TEXT    PRIMARY KEY,
+    email               TEXT    UNIQUE NOT NULL,
+    password_hash       TEXT    NOT NULL,
+    display_name        TEXT    NOT NULL,
+    role                TEXT    NOT NULL DEFAULT 'user',
+    is_verified         INTEGER NOT NULL DEFAULT 0,
+    verification_token  TEXT,
+    token_expires_at    INTEGER,
+    login_attempts      INTEGER NOT NULL DEFAULT 0,
+    locked_until        INTEGER NOT NULL DEFAULT 0,
+    created_at          INTEGER DEFAULT (unixepoch())
   );
 
   CREATE TABLE IF NOT EXISTS sessions (
@@ -41,12 +43,14 @@ db.exec(`
 `);
 
 // ── Safe migrations for existing databases ─────────────────────────────────
-// ALTER TABLE ADD COLUMN is idempotent-guarded by reading existing columns.
 
 const userCols = (db.pragma('table_info(users)') as { name: string }[]).map(c => c.name);
-if (!userCols.includes('role'))           db.exec(`ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'`);
-if (!userCols.includes('login_attempts')) db.exec(`ALTER TABLE users ADD COLUMN login_attempts INTEGER NOT NULL DEFAULT 0`);
-if (!userCols.includes('locked_until'))  db.exec(`ALTER TABLE users ADD COLUMN locked_until INTEGER NOT NULL DEFAULT 0`);
+if (!userCols.includes('role'))               db.exec(`ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'`);
+if (!userCols.includes('is_verified'))        db.exec(`ALTER TABLE users ADD COLUMN is_verified INTEGER NOT NULL DEFAULT 0`);
+if (!userCols.includes('verification_token')) db.exec(`ALTER TABLE users ADD COLUMN verification_token TEXT`);
+if (!userCols.includes('token_expires_at'))   db.exec(`ALTER TABLE users ADD COLUMN token_expires_at INTEGER`);
+if (!userCols.includes('login_attempts'))     db.exec(`ALTER TABLE users ADD COLUMN login_attempts INTEGER NOT NULL DEFAULT 0`);
+if (!userCols.includes('locked_until'))       db.exec(`ALTER TABLE users ADD COLUMN locked_until INTEGER NOT NULL DEFAULT 0`);
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -58,12 +62,15 @@ export interface User {
   password_hash: string;
   display_name: string;
   role: UserRole;
+  is_verified: number;
+  verification_token: string | null;
+  token_expires_at: number | null;
   login_attempts: number;
   locked_until: number;
   created_at: number;
 }
 
-export type SafeUser = Omit<User, 'password_hash'>;
+export type SafeUser = Omit<User, 'password_hash' | 'verification_token'>;
 
 export interface Session {
   id: string;
@@ -81,41 +88,46 @@ export interface Session {
 // ── Prepared statements ────────────────────────────────────────────────────
 
 const stmts = {
-  // ── users ──
+  // users
   insertUser: db.prepare(
-    `INSERT INTO users (id, email, password_hash, display_name, role)
-     VALUES (?, ?, ?, ?, ?)`
+    `INSERT INTO users (id, email, password_hash, display_name, role, is_verified, verification_token, token_expires_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
   ),
-  getUserByEmail: db.prepare(`SELECT * FROM users WHERE email = ?`),
-  getUserById:    db.prepare(`SELECT * FROM users WHERE id = ?`),
-  getAllUsers:    db.prepare(
-    `SELECT id, email, display_name, role, login_attempts, locked_until, created_at
+  getUserByEmail:    db.prepare(`SELECT * FROM users WHERE email = ?`),
+  getUserById:       db.prepare(`SELECT * FROM users WHERE id = ?`),
+  getUserByToken:    db.prepare(`SELECT * FROM users WHERE verification_token = ?`),
+  getAllUsers:       db.prepare(
+    `SELECT id, email, display_name, role, is_verified, login_attempts, locked_until, created_at
      FROM users ORDER BY created_at DESC`
   ),
-  countUsers:    db.prepare(`SELECT COUNT(*) as count FROM users`),
-  countAdmins:   db.prepare(`SELECT COUNT(*) as count FROM users WHERE role = 'admin'`),
-  updateRole:    db.prepare(`UPDATE users SET role = ? WHERE id = ?`),
+  countUsers:  db.prepare(`SELECT COUNT(*) as count FROM users`),
+  countAdmins: db.prepare(`SELECT COUNT(*) as count FROM users WHERE role = 'admin'`),
+  updateRole:  db.prepare(`UPDATE users SET role = ? WHERE id = ?`),
 
-  // login-protection
+  // verification
+  setVerified:      db.prepare(`UPDATE users SET is_verified = 1, verification_token = NULL, token_expires_at = NULL WHERE id = ?`),
+  setVerifyToken:   db.prepare(`UPDATE users SET verification_token = ?, token_expires_at = ? WHERE id = ?`),
+
+  // login protection
   incrementAttempts: db.prepare(`UPDATE users SET login_attempts = login_attempts + 1 WHERE email = ?`),
   lockUser:          db.prepare(`UPDATE users SET locked_until = ? WHERE email = ?`),
   resetAttempts:     db.prepare(`UPDATE users SET login_attempts = 0, locked_until = 0 WHERE email = ?`),
 
-  // ── sessions ──
+  // sessions
   insertSession: db.prepare(
     `INSERT INTO sessions (id, room_code, host_id) VALUES (?, ?, ?)`
   ),
-  getByCode:       db.prepare(`SELECT * FROM sessions WHERE room_code = ?`),
-  getById:         db.prepare(`SELECT * FROM sessions WHERE id = ?`),
-  getAllSessions:  db.prepare(`SELECT * FROM sessions ORDER BY created_at DESC`),
-  countSessions:   db.prepare(`SELECT COUNT(*) as count FROM sessions`),
-  deleteSession:   db.prepare(`DELETE FROM sessions WHERE id = ?`),
-  updatePlayback:  db.prepare(
+  getByCode:        db.prepare(`SELECT * FROM sessions WHERE room_code = ?`),
+  getById:          db.prepare(`SELECT * FROM sessions WHERE id = ?`),
+  getAllSessions:   db.prepare(`SELECT * FROM sessions ORDER BY created_at DESC`),
+  countSessions:    db.prepare(`SELECT COUNT(*) as count FROM sessions`),
+  deleteSession:    db.prepare(`DELETE FROM sessions WHERE id = ?`),
+  updatePlayback:   db.prepare(
     `UPDATE sessions SET playback_state = ?, current_position = ?, last_sync_ts = ? WHERE room_code = ?`
   ),
-  updateSegment:    db.prepare(`UPDATE sessions SET current_segment = ?, current_position = ? WHERE room_code = ?`),
-  updateHostSlider: db.prepare(`UPDATE sessions SET host_slider = ? WHERE room_code = ?`),
-  updateGuestSlider:db.prepare(`UPDATE sessions SET guest_slider = ? WHERE room_code = ?`),
+  updateSegment:     db.prepare(`UPDATE sessions SET current_segment = ?, current_position = ? WHERE room_code = ?`),
+  updateHostSlider:  db.prepare(`UPDATE sessions SET host_slider = ? WHERE room_code = ?`),
+  updateGuestSlider: db.prepare(`UPDATE sessions SET guest_slider = ? WHERE room_code = ?`),
 };
 
 // ── User helpers ───────────────────────────────────────────────────────────
@@ -125,9 +137,13 @@ export function createUser(
   passwordHash: string,
   displayName: string,
   role: UserRole = 'user',
+  verificationToken: string,
+  tokenExpiresAt: number,
 ): User {
   const id = randomUUID();
-  stmts.insertUser.run(id, email, passwordHash, displayName, role);
+  // Admins are pre-verified; regular users must verify email
+  const isVerified = role === 'admin' ? 1 : 0;
+  stmts.insertUser.run(id, email, passwordHash, displayName, role, isVerified, verificationToken, tokenExpiresAt);
   return stmts.getUserById.get(id) as User;
 }
 
@@ -137,6 +153,18 @@ export function getUserByEmail(email: string): User | undefined {
 
 export function getUserById(id: string): User | undefined {
   return stmts.getUserById.get(id) as User | undefined;
+}
+
+export function getUserByVerificationToken(token: string): User | undefined {
+  return stmts.getUserByToken.get(token) as User | undefined;
+}
+
+export function verifyUser(userId: string): void {
+  stmts.setVerified.run(userId);
+}
+
+export function setVerificationToken(userId: string, token: string, expiresAt: number): void {
+  stmts.setVerifyToken.run(token, expiresAt, userId);
 }
 
 export function getAllUsers(): SafeUser[] {
@@ -155,7 +183,6 @@ export function updateUserRole(userId: string, role: UserRole): void {
   stmts.updateRole.run(role, userId);
 }
 
-// Brute-force protection
 export function incrementLoginAttempts(email: string): void {
   stmts.incrementAttempts.run(email);
 }

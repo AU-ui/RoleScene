@@ -12,6 +12,8 @@ type Tab = 'login' | 'register';
 interface Props {
   onAuth: (role: 'user' | 'admin') => void;
   onBack: () => void;
+  onNeedsVerification: (email: string) => void;
+  initialError?: string;
 }
 
 // ── Validation ─────────────────────────────────────────────────────────────
@@ -57,7 +59,7 @@ function passwordStrength(v: string): { level: 0 | 1 | 2 | 3; label: string; col
 
 // ── Component ──────────────────────────────────────────────────────────────
 
-export default function AuthScreen({ onAuth, onBack }: Props) {
+export default function AuthScreen({ onAuth, onBack, onNeedsVerification, initialError = '' }: Props) {
   const [tab, setTab]             = useState<Tab>('login');
   const [email, setEmail]         = useState('');
   const [password, setPassword]   = useState('');
@@ -67,7 +69,7 @@ export default function AuthScreen({ onAuth, onBack }: Props) {
 
   // Per-field errors (shown after first blur or submit attempt)
   const [touched, setTouched] = useState<Record<string, boolean>>({});
-  const [serverError, setServerError] = useState('');
+  const [serverError, setServerError] = useState(initialError);
   const [loading, setLoading] = useState(false);
 
   const setAuth = useAuthStore((s) => s.setAuth);
@@ -104,7 +106,11 @@ export default function AuthScreen({ onAuth, onBack }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim(), password }),
       });
-      const data = await res.json() as { token?: string; user?: AuthUser; error?: string };
+      const data = await res.json() as { token?: string; user?: AuthUser; error?: string; code?: string; email?: string };
+      if (res.status === 403 && data.code === 'EMAIL_NOT_VERIFIED') {
+        onNeedsVerification(data.email ?? email);
+        return;
+      }
       if (!res.ok || !data.token || !data.user) {
         setServerError(data.error ?? 'Login failed. Please try again.');
         return;
@@ -135,13 +141,22 @@ export default function AuthScreen({ onAuth, onBack }: Props) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      const data = await res.json() as { token?: string; user?: AuthUser; error?: string };
-      if (!res.ok || !data.token || !data.user) {
+      const data = await res.json() as { token?: string; user?: AuthUser; error?: string; message?: string; email?: string };
+      if (!res.ok) {
         setServerError(data.error ?? 'Registration failed. Please try again.');
         return;
       }
-      setAuth(data.user, data.token);
-      onAuth(data.user.role);
+      // Regular user: server returns message + email (needs verification)
+      if (data.message && !data.token) {
+        onNeedsVerification(data.email ?? email);
+        return;
+      }
+      // Admin: server returns token immediately
+      if (data.token && data.user) {
+        setAuth(data.user, data.token);
+        onAuth(data.user.role);
+        return;
+      }
     } catch {
       setServerError('Cannot reach server. Is it running?');
     } finally {

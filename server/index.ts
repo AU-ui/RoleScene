@@ -4,11 +4,14 @@ import { WebSocketServer, WebSocket } from 'ws';
 import cors from 'cors';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { randomBytes } from 'crypto';
+import sgMail from '@sendgrid/mail';
 import {
   createSession, getSessionByCode, getAllSessions, getSessionById,
   getSessionCount, deleteSessionById,
   updatePlayback, updateSegment, updateSlider,
   createUser, getUserByEmail, getUserById,
+  getUserByVerificationToken, verifyUser, setVerificationToken,
   getAllUsers, getUserCount, getAdminCount, updateUserRole,
   incrementLoginAttempts, lockUser, resetLoginAttempts,
   type UserRole,
@@ -16,16 +19,23 @@ import {
 
 // ── Config ────────────────────────────────────────────────────────────────
 
-const JWT_SECRET     = process.env.JWT_SECRET ?? 'rolescene-dev-secret-change-in-prod';
-const JWT_EXPIRES    = '7d';
-const BCRYPT_ROUNDS  = 10;
-const ADMIN_CODE     = process.env.ADMIN_CODE; // must be set in .env to enable admin reg
+const JWT_SECRET    = process.env.JWT_SECRET    ?? 'rolescene-dev-secret-change-in-prod';
+const JWT_EXPIRES   = '7d';
+const BCRYPT_ROUNDS = 10;
+const ADMIN_CODE    = process.env.ADMIN_CODE;
+const APP_URL       = process.env.APP_URL ?? 'http://localhost:5173';
+
+// SendGrid
+const SENDGRID_API_KEY  = process.env.SENDGRID_API_KEY ?? '';
+const SENDGRID_FROM     = process.env.SENDGRID_FROM_EMAIL ?? 'noreply@rolescene.app';
+if (SENDGRID_API_KEY) sgMail.setApiKey(SENDGRID_API_KEY);
 
 // Lockout policy
-const MAX_LOGIN_ATTEMPTS = 5;
-const LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15 minutes
+const MAX_LOGIN_ATTEMPTS  = 5;
+const LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15 min
+const TOKEN_EXPIRY_MS     = 24 * 60 * 60 * 1000; // 24 hours
 
-// ── Validation helpers ────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -37,8 +47,82 @@ function isValidEmail(email: string): boolean {
   return EMAIL_RE.test(email) && email.length <= 254;
 }
 
-// ── In-memory rate limiter ────────────────────────────────────────────────
-// Keyed by IP + endpoint group.  Rejects when count exceeds limit per window.
+function generateToken(): string {
+  return randomBytes(32).toString('hex'); // 64-char hex
+}
+
+// ── Email sender ──────────────────────────────────────────────────────────
+
+async function sendVerificationEmail(email: string, displayName: string, token: string): Promise<void> {
+  if (!SENDGRID_API_KEY) {
+    // Dev fallback: log to console instead of sending
+    console.log(`\n  [DEV] Verification link for ${email}:\n  ${APP_URL}?verify=${token}\n`);
+    return;
+  }
+
+  const verifyUrl = `${APP_URL}?verify=${token}`;
+
+  await sgMail.send({
+    to:      email,
+    from:    SENDGRID_FROM,
+    subject: 'Verify your RoleScene account',
+    html: `
+      <!DOCTYPE html>
+      <html>
+      <body style="margin:0;padding:0;background:#0B0B14;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+        <table width="100%" cellpadding="0" cellspacing="0">
+          <tr><td align="center" style="padding:40px 16px;">
+            <table width="480" cellpadding="0" cellspacing="0" style="background:#13131F;border-radius:18px;border:1px solid #1E1E30;">
+              <tr><td style="padding:40px;">
+
+                <!-- Logo -->
+                <div style="text-align:center;margin-bottom:32px;">
+                  <span style="font-size:28px;font-weight:800;color:#fff;letter-spacing:1px;">RoleScene</span>
+                </div>
+
+                <!-- Heading -->
+                <h1 style="color:#fff;font-size:22px;font-weight:700;margin:0 0 12px;text-align:center;">
+                  Verify your email address
+                </h1>
+                <p style="color:#6B6B8A;font-size:15px;line-height:1.6;text-align:center;margin:0 0 32px;">
+                  Hi ${displayName}, thanks for joining RoleScene!<br>
+                  Click the button below to verify your email and activate your account.
+                </p>
+
+                <!-- Button -->
+                <div style="text-align:center;margin-bottom:32px;">
+                  <a href="${verifyUrl}"
+                     style="display:inline-block;background:#A855F7;color:#fff;font-size:16px;
+                            font-weight:700;text-decoration:none;padding:16px 40px;
+                            border-radius:14px;">
+                    Verify Email Address
+                  </a>
+                </div>
+
+                <!-- Fallback link -->
+                <p style="color:#6B6B8A;font-size:12px;text-align:center;margin:0 0 8px;">
+                  Or copy this link into your browser:
+                </p>
+                <p style="color:#A855F7;font-size:11px;text-align:center;word-break:break-all;margin:0 0 32px;">
+                  ${verifyUrl}
+                </p>
+
+                <!-- Expiry notice -->
+                <p style="color:#444460;font-size:11px;text-align:center;margin:0;">
+                  This link expires in 24 hours. If you didn't create an account, ignore this email.
+                </p>
+
+              </td></tr>
+            </table>
+          </td></tr>
+        </table>
+      </body>
+      </html>
+    `,
+  });
+}
+
+// ── Rate limiter ──────────────────────────────────────────────────────────
 
 interface RateEntry { count: number; resetAt: number }
 const rateLimiter = new Map<string, RateEntry>();
@@ -55,7 +139,6 @@ function isRateLimited(key: string, limit: number, windowMs: number): boolean {
   return false;
 }
 
-// Clean stale rate-limit entries every 5 minutes
 setInterval(() => {
   const now = Date.now();
   for (const [key, e] of rateLimiter) {
@@ -67,7 +150,7 @@ setInterval(() => {
 
 const app = express();
 app.use(cors({ origin: ['http://localhost:5173', 'http://127.0.0.1:5173'] }));
-app.use(express.json({ limit: '32kb' })); // cap body size
+app.use(express.json({ limit: '32kb' }));
 
 // ── Auth middleware ───────────────────────────────────────────────────────
 
@@ -79,8 +162,7 @@ interface AuthRequest extends Request {
 function requireAuth(req: AuthRequest, res: Response, next: NextFunction): void {
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) {
-    res.status(401).json({ error: 'Missing token' });
-    return;
+    res.status(401).json({ error: 'Missing token' }); return;
   }
   try {
     const payload = jwt.verify(header.slice(7), JWT_SECRET) as { sub: string; role: UserRole };
@@ -95,35 +177,28 @@ function requireAuth(req: AuthRequest, res: Response, next: NextFunction): void 
 function requireAdmin(req: AuthRequest, res: Response, next: NextFunction): void {
   requireAuth(req, res, () => {
     if (req.userRole !== 'admin') {
-      res.status(403).json({ error: 'Admin access required' });
-      return;
+      res.status(403).json({ error: 'Admin access required' }); return;
     }
     next();
   });
 }
 
-// ── Rate-limit middleware factories ───────────────────────────────────────
+// ── Rate-limit middleware ─────────────────────────────────────────────────
 
-/** 15 req / 15 min per IP — used on auth endpoints (login, register) */
 function authRateLimit(req: Request, res: Response, next: NextFunction): void {
-  const ip  = (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim()
-            ?? req.socket.remoteAddress
-            ?? 'unknown';
+  const ip = (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim()
+           ?? req.socket.remoteAddress ?? 'unknown';
   if (isRateLimited(`auth:${ip}`, 15, 15 * 60 * 1000)) {
-    res.status(429).json({ error: 'Too many requests. Please wait 15 minutes before trying again.' });
-    return;
+    res.status(429).json({ error: 'Too many requests. Please wait 15 minutes before trying again.' }); return;
   }
   next();
 }
 
-/** 100 req / min per IP — broad API protection */
 function apiRateLimit(req: Request, res: Response, next: NextFunction): void {
-  const ip  = (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim()
-            ?? req.socket.remoteAddress
-            ?? 'unknown';
+  const ip = (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim()
+           ?? req.socket.remoteAddress ?? 'unknown';
   if (isRateLimited(`api:${ip}`, 100, 60 * 1000)) {
-    res.status(429).json({ error: 'Rate limit exceeded. Slow down.' });
-    return;
+    res.status(429).json({ error: 'Rate limit exceeded. Slow down.' }); return;
   }
   next();
 }
@@ -139,48 +214,109 @@ app.post('/api/auth/register', authRateLimit, async (req: Request, res: Response
   const displayName = sanitizeText(req.body?.displayName, 50);
   const adminCode   = sanitizeText(req.body?.adminCode, 64);
 
-  // Input validation
   if (!email || !password || !displayName) {
-    res.status(400).json({ error: 'email, password and displayName are required' });
-    return;
+    res.status(400).json({ error: 'email, password and displayName are required' }); return;
   }
   if (!isValidEmail(email)) {
-    res.status(400).json({ error: 'Invalid email format' });
-    return;
+    res.status(400).json({ error: 'Invalid email format' }); return;
   }
   if (password.length < 6) {
-    res.status(400).json({ error: 'Password must be at least 6 characters' });
-    return;
+    res.status(400).json({ error: 'Password must be at least 6 characters' }); return;
   }
   if (password.length > 72) {
-    res.status(400).json({ error: 'Password must be at most 72 characters' });
-    return;
+    res.status(400).json({ error: 'Password must be at most 72 characters' }); return;
   }
   if (displayName.length < 2) {
-    res.status(400).json({ error: 'Display name must be at least 2 characters' });
-    return;
+    res.status(400).json({ error: 'Display name must be at least 2 characters' }); return;
   }
 
   const existing = getUserByEmail(email);
   if (existing) {
-    res.status(409).json({ error: 'An account with this email already exists' });
+    res.status(409).json({ error: 'An account with this email already exists' }); return;
+  }
+
+  let role: UserRole = 'user';
+  if (ADMIN_CODE && adminCode === ADMIN_CODE) role = 'admin';
+
+  const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+  const verToken     = generateToken();
+  const expiresAt    = Date.now() + TOKEN_EXPIRY_MS;
+
+  const user = createUser(email, passwordHash, displayName, role, verToken, expiresAt);
+
+  // Send verification email (admins are auto-verified)
+  if (role !== 'admin') {
+    try {
+      await sendVerificationEmail(email, displayName, verToken);
+    } catch (err) {
+      console.error('SendGrid error:', err);
+      // Don't block registration if email fails — user can resend
+    }
+    res.status(201).json({
+      message: 'Account created. Please check your email to verify your account.',
+      email: user.email,
+    });
     return;
   }
 
-  // Determine role: admin only if ADMIN_CODE is configured and matches
-  let role: UserRole = 'user';
-  if (ADMIN_CODE && adminCode === ADMIN_CODE) {
-    role = 'admin';
-  }
-
-  const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
-  const user = createUser(email, passwordHash, displayName, role);
+  // Admin: skip verification, issue token immediately
   const token = jwt.sign({ sub: user.id, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
-
   res.status(201).json({
     token,
     user: { id: user.id, email: user.email, displayName: user.display_name, role: user.role },
   });
+});
+
+// GET /api/auth/verify?token=xxx
+app.get('/api/auth/verify', async (req: Request, res: Response): Promise<void> => {
+  const token = sanitizeText(req.query.token, 128);
+  if (!token) {
+    res.status(400).json({ error: 'Verification token is required' }); return;
+  }
+
+  const user = getUserByVerificationToken(token);
+  if (!user) {
+    res.status(400).json({ error: 'Invalid or already used verification link' }); return;
+  }
+
+  if (user.token_expires_at && Date.now() > user.token_expires_at) {
+    res.status(400).json({ error: 'Verification link has expired. Please request a new one.' }); return;
+  }
+
+  verifyUser(user.id);
+
+  const jwtToken = jwt.sign({ sub: user.id, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
+  res.json({
+    token: jwtToken,
+    user: { id: user.id, email: user.email, displayName: user.display_name, role: user.role },
+  });
+});
+
+// POST /api/auth/resend-verification
+app.post('/api/auth/resend-verification', authRateLimit, async (req: Request, res: Response): Promise<void> => {
+  const email = sanitizeText(req.body?.email, 254).toLowerCase();
+  if (!email || !isValidEmail(email)) {
+    res.status(400).json({ error: 'Valid email is required' }); return;
+  }
+
+  const user = getUserByEmail(email);
+  // Always respond with success to prevent email enumeration
+  if (!user || user.is_verified) {
+    res.json({ message: 'If your email is registered and unverified, a new link has been sent.' });
+    return;
+  }
+
+  const verToken  = generateToken();
+  const expiresAt = Date.now() + TOKEN_EXPIRY_MS;
+  setVerificationToken(user.id, verToken, expiresAt);
+
+  try {
+    await sendVerificationEmail(email, user.display_name, verToken);
+  } catch (err) {
+    console.error('SendGrid error:', err);
+  }
+
+  res.json({ message: 'If your email is registered and unverified, a new link has been sent.' });
 });
 
 // POST /api/auth/login
@@ -189,28 +325,23 @@ app.post('/api/auth/login', authRateLimit, async (req: Request, res: Response): 
   const password = sanitizeText(req.body?.password, 128);
 
   if (!email || !password) {
-    res.status(400).json({ error: 'email and password are required' });
-    return;
+    res.status(400).json({ error: 'email and password are required' }); return;
   }
   if (!isValidEmail(email)) {
-    res.status(400).json({ error: 'Invalid email format' });
-    return;
+    res.status(400).json({ error: 'Invalid email format' }); return;
   }
 
   const user = getUserByEmail(email);
   if (!user) {
-    // Do not reveal whether email exists
-    res.status(401).json({ error: 'Invalid email or password' });
-    return;
+    res.status(401).json({ error: 'Invalid email or password' }); return;
   }
 
-  // Account lockout check
+  // Lockout check
   if (user.locked_until && Date.now() < user.locked_until) {
     const remaining = Math.ceil((user.locked_until - Date.now()) / 60000);
     res.status(423).json({
       error: `Account temporarily locked. Try again in ${remaining} minute${remaining !== 1 ? 's' : ''}.`,
-    });
-    return;
+    }); return;
   }
 
   const valid = await bcrypt.compare(password, user.password_hash);
@@ -219,21 +350,24 @@ app.post('/api/auth/login', authRateLimit, async (req: Request, res: Response): 
     const attempts = user.login_attempts + 1;
     if (attempts >= MAX_LOGIN_ATTEMPTS) {
       lockUser(email, Date.now() + LOCKOUT_DURATION_MS);
-      res.status(423).json({
-        error: `Too many failed attempts. Account locked for 15 minutes.`,
-      });
-      return;
+      res.status(423).json({ error: 'Too many failed attempts. Account locked for 15 minutes.' }); return;
     }
-    const remaining = MAX_LOGIN_ATTEMPTS - attempts;
+    const left = MAX_LOGIN_ATTEMPTS - attempts;
     res.status(401).json({
-      error: `Invalid email or password. ${remaining} attempt${remaining !== 1 ? 's' : ''} remaining.`,
-    });
-    return;
+      error: `Invalid email or password. ${left} attempt${left !== 1 ? 's' : ''} remaining.`,
+    }); return;
   }
 
-  // Success — reset lockout state
-  resetLoginAttempts(email);
+  // Email not verified
+  if (!user.is_verified) {
+    res.status(403).json({
+      error: 'Please verify your email before signing in.',
+      code: 'EMAIL_NOT_VERIFIED',
+      email: user.email,
+    }); return;
+  }
 
+  resetLoginAttempts(email);
   const token = jwt.sign({ sub: user.id, role: user.role }, JWT_SECRET, { expiresIn: JWT_EXPIRES });
   res.json({
     token,
@@ -248,7 +382,7 @@ app.get('/api/auth/me', requireAuth, (req: AuthRequest, res: Response): void => 
   res.json({ id: user.id, email: user.email, displayName: user.display_name, role: user.role });
 });
 
-// ── Session routes (authenticated) ────────────────────────────────────────
+// ── Session routes ────────────────────────────────────────────────────────
 
 app.post('/api/sessions', requireAuth, (req: AuthRequest, res: Response): void => {
   const s = createSession(req.userId);
@@ -257,8 +391,7 @@ app.post('/api/sessions', requireAuth, (req: AuthRequest, res: Response): void =
 
 app.get('/api/sessions/:roomCode', requireAuth, (req: Request, res: Response): void => {
   if (!/^\d{6}$/.test(req.params.roomCode)) {
-    res.status(400).json({ error: 'Room code must be 6 digits' });
-    return;
+    res.status(400).json({ error: 'Room code must be 6 digits' }); return;
   }
   const session = getSessionByCode(req.params.roomCode);
   if (!session) { res.status(404).json({ error: 'Session not found' }); return; }
@@ -266,54 +399,37 @@ app.get('/api/sessions/:roomCode', requireAuth, (req: Request, res: Response): v
 });
 
 // ── Admin routes ──────────────────────────────────────────────────────────
-//  All routes below require an authenticated user with role = 'admin'.
 
-// GET /api/admin/stats
 app.get('/api/admin/stats', requireAdmin, (_req: Request, res: Response): void => {
-  res.json({
-    userCount:    getUserCount(),
-    sessionCount: getSessionCount(),
-    activeRooms:  rooms.size,
-  });
+  res.json({ userCount: getUserCount(), sessionCount: getSessionCount(), activeRooms: rooms.size });
 });
 
-// GET /api/admin/users
 app.get('/api/admin/users', requireAdmin, (_req: Request, res: Response): void => {
   res.json(getAllUsers());
 });
 
-// PATCH /api/admin/users/:id/role
 app.patch('/api/admin/users/:id/role', requireAdmin, (req: AuthRequest, res: Response): void => {
   const { id } = req.params;
   const role = sanitizeText(req.body?.role, 10) as UserRole;
   if (role !== 'user' && role !== 'admin') {
-    res.status(400).json({ error: 'role must be "user" or "admin"' });
-    return;
+    res.status(400).json({ error: 'role must be "user" or "admin"' }); return;
   }
-  // Prevent self-demotion
   if (id === req.userId && role !== 'admin') {
-    res.status(400).json({ error: 'You cannot remove your own admin role' });
-    return;
+    res.status(400).json({ error: 'You cannot remove your own admin role' }); return;
   }
   updateUserRole(id, role);
   res.json({ id, role });
 });
 
-// GET /api/admin/sessions
 app.get('/api/admin/sessions', requireAdmin, (_req: Request, res: Response): void => {
-  const sessions = getAllSessions().map(s => ({
-    ...s,
-    isActive: rooms.has(s.room_code),
-  }));
+  const sessions = getAllSessions().map(s => ({ ...s, isActive: rooms.has(s.room_code) }));
   res.json(sessions);
 });
 
-// DELETE /api/admin/sessions/:id
 app.delete('/api/admin/sessions/:id', requireAdmin, (req: Request, res: Response): void => {
   const session = getSessionById(req.params.id);
   if (!session) { res.status(404).json({ error: 'Session not found' }); return; }
 
-  // Close any live WS connections for this room
   const room = rooms.get(session.room_code);
   if (room) {
     const notice = JSON.stringify({ type: 'session_deleted' });
@@ -353,8 +469,7 @@ wss.on('connection', (ws, req) => {
   const role = url.searchParams.get('role') as 'host' | 'guest' | null;
 
   if (!code || !/^\d{6}$/.test(code) || (role !== 'host' && role !== 'guest')) {
-    ws.close(4000, 'Missing or invalid roomCode / role');
-    return;
+    ws.close(4000, 'Missing or invalid roomCode / role'); return;
   }
 
   const session = getSessionByCode(code);
@@ -368,7 +483,6 @@ wss.on('connection', (ws, req) => {
   } else {
     room.guest = ws;
     send(room.host, { type: 'partner_joined' });
-    // Send current session state so a late-joining guest syncs immediately
     send(ws, {
       type: 'session_state',
       playbackState:   session.playback_state,
@@ -408,9 +522,7 @@ wss.on('connection', (ws, req) => {
       case 'heartbeat': {
         const pos = Number(msg.position ?? 0);
         updatePlayback(code, 'playing', pos, now);
-        if (role === 'host') {
-          send(room.guest, { type: 'heartbeat', position: pos, serverTimestamp: now });
-        }
+        if (role === 'host') send(room.guest, { type: 'heartbeat', position: pos, serverTimestamp: now });
         break;
       }
       case 'slider': {
@@ -433,10 +545,8 @@ wss.on('connection', (ws, req) => {
   ws.on('close', () => {
     if (role === 'host') room.host = null;
     else                 room.guest = null;
-
     const partner = role === 'host' ? room.guest : room.host;
     send(partner, { type: 'partner_left' });
-
     if (!room.host && !room.guest) rooms.delete(code);
   });
 
