@@ -5,7 +5,7 @@ import cors from 'cors';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { randomBytes } from 'crypto';
-import sgMail from '@sendgrid/mail';
+import nodemailer from 'nodemailer';
 import {
   createSession, getSessionByCode, getAllSessions, getSessionById,
   getSessionCount, deleteSessionById,
@@ -23,12 +23,16 @@ const JWT_SECRET    = process.env.JWT_SECRET    ?? 'rolescene-dev-secret-change-
 const JWT_EXPIRES   = '7d';
 const BCRYPT_ROUNDS = 10;
 const ADMIN_CODE    = process.env.ADMIN_CODE;
-const APP_URL       = process.env.APP_URL ?? 'http://localhost:5173';
+const FRONTEND_URL  = process.env.FRONTEND_URL  ?? 'http://localhost:3000';
 
-// SendGrid
-const SENDGRID_API_KEY  = process.env.SENDGRID_API_KEY ?? '';
-const SENDGRID_FROM     = process.env.SENDGRID_FROM_EMAIL ?? 'noreply@rolescene.app';
-if (SENDGRID_API_KEY) sgMail.setApiKey(SENDGRID_API_KEY);
+// Nodemailer — Gmail SMTP
+const EMAIL_USER = process.env.EMAIL_USER ?? '';
+const EMAIL_PASS = process.env.EMAIL_PASS ?? '';
+
+const mailer = nodemailer.createTransport({
+  service: 'gmail',
+  auth: { user: EMAIL_USER, pass: EMAIL_PASS },
+});
 
 // Lockout policy
 const MAX_LOGIN_ATTEMPTS  = 5;
@@ -54,17 +58,17 @@ function generateToken(): string {
 // ── Email sender ──────────────────────────────────────────────────────────
 
 async function sendVerificationEmail(email: string, displayName: string, token: string): Promise<void> {
-  if (!SENDGRID_API_KEY) {
-    // Dev fallback: log to console instead of sending
-    console.log(`\n  [DEV] Verification link for ${email}:\n  ${APP_URL}?verify=${token}\n`);
+  const verifyUrl = `${FRONTEND_URL}?verify=${token}`;
+
+  if (!EMAIL_USER || !EMAIL_PASS) {
+    // Dev fallback: print link to console when email is not configured
+    console.log(`\n  [DEV] Verification link for ${email}:\n  ${verifyUrl}\n`);
     return;
   }
 
-  const verifyUrl = `${APP_URL}?verify=${token}`;
-
-  await sgMail.send({
+  await mailer.sendMail({
+    from:    `"RoleScene" <${EMAIL_USER}>`,
     to:      email,
-    from:    SENDGRID_FROM,
     subject: 'Verify your RoleScene account',
     html: `
       <!DOCTYPE html>
@@ -75,12 +79,10 @@ async function sendVerificationEmail(email: string, displayName: string, token: 
             <table width="480" cellpadding="0" cellspacing="0" style="background:#13131F;border-radius:18px;border:1px solid #1E1E30;">
               <tr><td style="padding:40px;">
 
-                <!-- Logo -->
                 <div style="text-align:center;margin-bottom:32px;">
                   <span style="font-size:28px;font-weight:800;color:#fff;letter-spacing:1px;">RoleScene</span>
                 </div>
 
-                <!-- Heading -->
                 <h1 style="color:#fff;font-size:22px;font-weight:700;margin:0 0 12px;text-align:center;">
                   Verify your email address
                 </h1>
@@ -89,17 +91,14 @@ async function sendVerificationEmail(email: string, displayName: string, token: 
                   Click the button below to verify your email and activate your account.
                 </p>
 
-                <!-- Button -->
                 <div style="text-align:center;margin-bottom:32px;">
                   <a href="${verifyUrl}"
                      style="display:inline-block;background:#A855F7;color:#fff;font-size:16px;
-                            font-weight:700;text-decoration:none;padding:16px 40px;
-                            border-radius:14px;">
+                            font-weight:700;text-decoration:none;padding:16px 40px;border-radius:14px;">
                     Verify Email Address
                   </a>
                 </div>
 
-                <!-- Fallback link -->
                 <p style="color:#6B6B8A;font-size:12px;text-align:center;margin:0 0 8px;">
                   Or copy this link into your browser:
                 </p>
@@ -107,7 +106,6 @@ async function sendVerificationEmail(email: string, displayName: string, token: 
                   ${verifyUrl}
                 </p>
 
-                <!-- Expiry notice -->
                 <p style="color:#444460;font-size:11px;text-align:center;margin:0;">
                   This link expires in 24 hours. If you didn't create an account, ignore this email.
                 </p>
@@ -149,7 +147,7 @@ setInterval(() => {
 // ── Express ───────────────────────────────────────────────────────────────
 
 const app = express();
-app.use(cors({ origin: ['http://localhost:5173', 'http://127.0.0.1:5173'] }));
+app.use(cors({ origin: ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:5173'] }));
 app.use(express.json({ limit: '32kb' }));
 
 // ── Auth middleware ───────────────────────────────────────────────────────
