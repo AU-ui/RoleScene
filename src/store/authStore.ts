@@ -1,9 +1,12 @@
 import { create } from 'zustand';
 
+export type UserRole = 'user' | 'admin';
+
 export interface AuthUser {
   id: string;
   email: string;
   displayName: string;
+  role: UserRole;
 }
 
 interface AuthStore {
@@ -13,11 +16,12 @@ interface AuthStore {
   setAuth: (user: AuthUser, token: string) => void;
   logout: () => void;
   isAuthenticated: () => boolean;
+  isAdmin: () => boolean;
 }
 
 // Rehydrate from localStorage on first load
 const storedToken = localStorage.getItem('rs_token');
-const storedUser  = (() => {
+const storedUser = (() => {
   try {
     const raw = localStorage.getItem('rs_user');
     return raw ? (JSON.parse(raw) as AuthUser) : null;
@@ -41,9 +45,10 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   },
 
   isAuthenticated: () => !!(get().token && get().user),
+  isAdmin:         () => get().user?.role === 'admin',
 }));
 
-/** Attach the Bearer token to fetch calls automatically. */
+/** Attach Bearer token to fetch calls automatically. */
 export function authFetch(input: RequestInfo, init: RequestInit = {}): Promise<Response> {
   const token = useAuthStore.getState().token;
   return fetch(input, {
