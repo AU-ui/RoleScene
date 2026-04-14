@@ -36,6 +36,8 @@ yarn-error.*
 
 # SQLite database (auto-created at runtime)
 rolescene.db
+rolescene.db-shm
+rolescene.db-wal
 
 # typescript
 *.tsbuildinfo
