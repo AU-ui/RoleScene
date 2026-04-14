@@ -160,13 +160,21 @@ setInterval(() => {
 
 const app = express();
 app.use(cors({
-  origin: [
-    'http://localhost:3000',
-    'http://127.0.0.1:3000',
-    'http://localhost:5173',
-    'https://role-scene.vercel.app',
-    FRONTEND_URL,
-  ].filter(Boolean),
+  origin: (origin, cb) => {
+    // Allow requests with no origin (mobile apps, curl, server-to-server)
+    if (!origin) return cb(null, true);
+    const allowed = [
+      'http://localhost:3000',
+      'http://localhost:5173',
+      'https://role-scene.vercel.app',
+      FRONTEND_URL,
+    ];
+    if (allowed.includes(origin)) return cb(null, true);
+    // Also allow any vercel.app preview deployments
+    if (origin.endsWith('.vercel.app')) return cb(null, true);
+    cb(new Error(`CORS: origin ${origin} not allowed`));
+  },
+  credentials: true,
 }));
 app.use(express.json({ limit: '32kb' }));
 
