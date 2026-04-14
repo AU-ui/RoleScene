@@ -1,8 +1,8 @@
-import React, { useEffect, useCallback } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import { useSessionStore } from '../store/sessionStore';
 import { useSync } from '../hooks/useSync';
-import { useAudio } from '../hooks/useAudio';
-import { HOST_TRACKS } from '../tracks';
+import { useTTS } from '../hooks/useTTS';
+import { SCRIPT } from '../script';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -17,8 +17,6 @@ function fmt(s: number) {
   const m = Math.floor(s / 60);
   return `${m}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
 }
-
-// ─── Sub-components ────────────────────────────────────────────────────────
 
 const PulsingDot = ({ color }: { color: string }) => (
   <div style={{ width: 10, height: 10, borderRadius: '50%', backgroundColor: color,
@@ -54,70 +52,84 @@ export default function HostScreen({ onLeave }: { onLeave: () => void }) {
     currentSegment, setCurrentSegment,
   } = useSessionStore();
 
+  // ── Refs to break circular hook dependency ────────────────────────────
+  // useSync callbacks need tts.* but useTTS needs sendNextSegment.
+  // We proxy tts calls through refs so useSync can be called first.
+  const ttsPlayRef        = useRef<(pos: number) => void>(() => {});
+  const ttsPauseRef       = useRef<() => void>(() => {});
+  const ttsSeekRef        = useRef<(pos: number) => void>(() => {});
+  const ttsGetPositionRef = useRef<() => number>(() => 0);
+
+  // ── 1. Sync engine (needs stable callbacks → uses refs above) ─────────
+  const { sendPlay, sendPause, sendSeek, sendSlider, sendNextSegment, registerGetPosition } =
+    useSync({
+      roomCode,
+      role: 'host',
+      onPlay:        (pos) => { ttsPlayRef.current(pos);  setPlaybackState('playing'); },
+      onPause:       (pos) => { ttsPauseRef.current();    setCurrentPosition(pos);     },
+      onSeek:        (pos) => { ttsSeekRef.current(pos);  setCurrentPosition(pos);     },
+      onHeartbeat:   ()    => { /* host is time authority — no correction needed */ },
+      onNextSegment: (seg) => { ttsPauseRef.current(); setCurrentSegment(seg); setCurrentPosition(0); },
+    });
+
+  // ── 2. Segment-end handler (needs sendNextSegment, defined after useSync) ──
   const handleSegmentEnd = useCallback(() => {
     const next = currentSegment + 1;
-    if (next < HOST_TRACKS.length) {
+    if (next < SCRIPT.length) {
       setCurrentSegment(next);
       setPlaybackState('paused');
       setCurrentPosition(0);
       sendNextSegment(next);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentSegment]);
+  }, [currentSegment, sendNextSegment, setCurrentSegment, setPlaybackState, setCurrentPosition]);
 
-  const audio = useAudio(HOST_TRACKS, currentSegment, handleSegmentEnd);
+  // ── 3. TTS hook (can now receive handleSegmentEnd) ─────────────────────
+  const tts = useTTS(currentSegment, 'host', handleSegmentEnd);
 
-  const { sendPlay, sendPause, sendSeek, sendSlider, sendNextSegment, registerGetPosition } = useSync({
-    roomCode,
-    role: 'host',
-    onPlay:         (pos)     => { audio.play(pos);  setPlaybackState('playing'); },
-    onPause:        (pos)     => { audio.pause();    setCurrentPosition(pos);     },
-    onSeek:         (pos)     => { audio.seek(pos);  setCurrentPosition(pos);     },
-    onHeartbeat:    ()        => { /* host does not receive heartbeat corrections */ },
-    onNextSegment:  (segment) => { audio.pause(); setCurrentSegment(segment); setCurrentPosition(0); },
-  });
+  // ── 4. Update proxy refs so useSync callbacks always call latest tts ──
+  ttsPlayRef.current        = tts.play;
+  ttsPauseRef.current       = tts.pause;
+  ttsSeekRef.current        = tts.seek;
+  ttsGetPositionRef.current = tts.getPosition;
 
-  useEffect(() => { registerGetPosition(audio.getPosition); }, [registerGetPosition, audio.getPosition]);
-  useEffect(() => { setCurrentPosition(audio.currentPosition); }, [audio.currentPosition]);
+  useEffect(() => {
+    registerGetPosition(tts.getPosition);
+  }, [registerGetPosition, tts.getPosition]);
+
+  useEffect(() => {
+    setCurrentPosition(tts.currentPosition);
+  }, [tts.currentPosition, setCurrentPosition]);
 
   // ── Handlers ───────────────────────────────────────────────────────────
 
   const handlePlayPause = useCallback(() => {
     if (!partnerConnected) return;
-    const pos = audio.getPosition();
+    const pos = tts.getPosition();
     if (playbackState === 'playing') {
-      audio.pause(); sendPause(pos); setPlaybackState('paused');
+      tts.pause(); sendPause(pos); setPlaybackState('paused');
     } else {
-      audio.play(pos); sendPlay(pos); setPlaybackState('playing');
+      tts.play(pos); sendPlay(pos); setPlaybackState('playing');
     }
-  }, [playbackState, partnerConnected, audio, sendPlay, sendPause, setPlaybackState]);
-
-  const handleSeek = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const pos = Number(e.target.value);
-    audio.seek(pos); sendSeek(pos); setCurrentPosition(pos);
-  }, [audio, sendSeek, setCurrentPosition]);
+  }, [playbackState, partnerConnected, tts, sendPlay, sendPause, setPlaybackState]);
 
   const handleSlider = useCallback((value: number) => {
     setMySliderValue(value); sendSlider(value);
   }, [setMySliderValue, sendSlider]);
 
-  const handleNextSegment = useCallback(() => {
-    const next = currentSegment + 1;
-    if (next >= HOST_TRACKS.length) return;
-    audio.pause();
-    setCurrentSegment(next);
+  const handleJumpTo = useCallback((i: number) => {
+    if (i === currentSegment) return;
+    tts.pause();
+    setCurrentSegment(i);
     setPlaybackState('paused');
     setCurrentPosition(0);
-    sendNextSegment(next);
-  }, [currentSegment, audio, setCurrentSegment, setPlaybackState, setCurrentPosition, sendNextSegment]);
+    sendNextSegment(i);
+  }, [currentSegment, tts, setCurrentSegment, setPlaybackState, setCurrentPosition, sendNextSegment]);
 
   // ── Derived ────────────────────────────────────────────────────────────
 
-  const syncCfg      = SYNC_CONFIG[syncStatus];
+  const syncCfg       = SYNC_CONFIG[syncStatus];
   const combinedScore = Math.round((mySliderValue + partnerSliderValue) / 2);
-  const pos          = audio.currentPosition;
-  const maxDur       = Math.max(audio.duration || (HOST_TRACKS[currentSegment]?.durationHint ?? 120), pos + 1);
-  const currentTrack = HOST_TRACKS[currentSegment];
+  const pos           = tts.currentPosition;
 
   // ──────────────────────────────────────────────────────────────────────
 
@@ -160,9 +172,9 @@ export default function HostScreen({ onLeave }: { onLeave: () => void }) {
           </div>
           <div style={s.statsRow}>
             {[
-              { k: 'Segment', v: `${currentSegment + 1} / ${HOST_TRACKS.length}` },
+              { k: 'Line',     v: `${currentSegment + 1} / ${SCRIPT.length}` },
               { k: 'Position', v: fmt(pos) },
-              { k: 'Role', v: 'Host' },
+              { k: 'Role',     v: 'Host (Boy)' },
             ].map(({ k, v }, i, a) => (
               <React.Fragment key={k}>
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -175,43 +187,52 @@ export default function HostScreen({ onLeave }: { onLeave: () => void }) {
           </div>
         </div>
 
-        {/* Track Info */}
+        {/* Current Line */}
         <div style={card}>
           <span style={ct}>Now Playing</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{ width: 44, height: 44, borderRadius: 10, backgroundColor: '#1A1A2E',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>
-              🎙
-            </div>
-            <div>
-              <div style={{ color: '#FFF', fontWeight: 700, fontSize: 15 }}>
-                {currentTrack?.title ?? 'No track loaded'}
-              </div>
-              <div style={{ color: '#6B6B8A', fontSize: 12, marginTop: 2 }}>
-                {currentTrack?.url ? 'Real audio loaded' : 'Simulated playback — add a track URL in tracks.ts'}
-              </div>
+
+          {/* Speaker badge */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+            <div style={{
+              padding: '4px 12px', borderRadius: 20, fontSize: 11, fontWeight: 700, letterSpacing: 1,
+              backgroundColor: tts.isMyLine ? '#A855F720' : '#EC489920',
+              color:            tts.isMyLine ? '#A855F7'   : '#EC4899',
+              border: `1px solid ${tts.isMyLine ? '#A855F7' : '#EC4899'}`,
+            }}>
+              {tts.lineSpeaker ?? '—'}
+              {tts.isMyLine ? ' · Your line' : ' · Partner\'s line'}
             </div>
           </div>
-          {/* Segment navigation */}
-          <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-            {HOST_TRACKS.map((t, i) => (
-              <button key={i} onClick={() => {
-                  if (i === currentSegment) return;
-                  audio.pause();
-                  setCurrentSegment(i);
-                  setPlaybackState('paused');
-                  setCurrentPosition(0);
-                  sendNextSegment(i);
-                }}
+
+          {/* Line text */}
+          <div style={{
+            backgroundColor: '#0B0B14', borderRadius: 12, padding: '16px 18px',
+            marginBottom: 14, borderLeft: `3px solid ${tts.isMyLine ? '#A855F7' : '#EC4899'}`,
+          }}>
+            <span style={{ color: tts.isMyLine ? '#FFF' : '#9A9AB0', fontSize: 15, lineHeight: 1.6, fontStyle: 'italic' }}>
+              "{tts.lineText}"
+            </span>
+          </div>
+
+          {/* Line progress dots */}
+          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+            {SCRIPT.map((ln, i) => (
+              <button key={i} onClick={() => handleJumpTo(i)} title={`Line ${i + 1}: ${ln.speaker}`}
                 style={{
-                  flex: 1, padding: '6px 0', borderRadius: 8, fontSize: 11, fontWeight: 700,
-                  border: `1px solid ${i === currentSegment ? '#A855F7' : '#2A2A3A'}`,
-                  backgroundColor: i === currentSegment ? '#A855F720' : 'transparent',
-                  color: i === currentSegment ? '#A855F7' : '#6B6B8A',
+                  width: 28, height: 28, borderRadius: 8, fontSize: 10, fontWeight: 700,
+                  border: `1px solid ${i === currentSegment
+                    ? (ln.role === 'host' ? '#A855F7' : '#EC4899')
+                    : '#2A2A3A'}`,
+                  backgroundColor: i === currentSegment
+                    ? (ln.role === 'host' ? '#A855F720' : '#EC489920')
+                    : i < currentSegment ? '#1A1A2E' : 'transparent',
+                  color: i === currentSegment
+                    ? (ln.role === 'host' ? '#A855F7' : '#EC4899')
+                    : i < currentSegment ? '#4A4A6A' : '#2A2A4A',
                   cursor: i === currentSegment ? 'default' : 'pointer',
                 }}
               >
-                Ch {i + 1}
+                {i + 1}
               </button>
             ))}
           </div>
@@ -221,14 +242,15 @@ export default function HostScreen({ onLeave }: { onLeave: () => void }) {
         <div style={card}>
           <span style={ct}>Playback</span>
 
-          {/* Seek bar */}
+          {/* Progress bar (read-only visual) */}
           <div style={{ marginBottom: 14 }}>
-            <input type="range" min={0} max={maxDur} step={0.1} value={pos}
-              onChange={handleSeek} disabled={!partnerConnected}
-              style={{ width: '100%', accentColor: '#A855F7' }} />
+            <input type="range" min={0} max={tts.duration} step={0.1} value={pos}
+              readOnly
+              style={{ width: '100%', accentColor: '#A855F7', cursor: 'default' }}
+            />
             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2 }}>
               <span style={s.timeLabel}>{fmt(pos)}</span>
-              <span style={s.timeLabel}>{audio.duration ? fmt(audio.duration) : fmt(HOST_TRACKS[currentSegment]?.durationHint ?? 0)}</span>
+              <span style={s.timeLabel}>{fmt(tts.duration)}</span>
             </div>
           </div>
 
@@ -247,16 +269,17 @@ export default function HostScreen({ onLeave }: { onLeave: () => void }) {
             </span>
           </button>
 
-          {/* Next segment */}
-          <button onClick={handleNextSegment}
-            disabled={!partnerConnected || currentSegment >= HOST_TRACKS.length - 1}
+          {/* Next line */}
+          <button
+            onClick={() => handleJumpTo(currentSegment + 1)}
+            disabled={!partnerConnected || currentSegment >= SCRIPT.length - 1}
             style={{
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
               backgroundColor: 'transparent', borderRadius: 12, padding: '10px 0', width: '100%',
               border: '1px solid #2A2A3A', cursor: 'pointer',
-              opacity: (!partnerConnected || currentSegment >= HOST_TRACKS.length - 1) ? 0.35 : 1,
+              opacity: (!partnerConnected || currentSegment >= SCRIPT.length - 1) ? 0.35 : 1,
             }}>
-            <span style={{ color: '#6B6B8A', fontSize: 13, fontWeight: 600 }}>Next Chapter ›</span>
+            <span style={{ color: '#6B6B8A', fontSize: 13, fontWeight: 600 }}>Skip to Next Line ›</span>
           </button>
 
           {!partnerConnected && (
@@ -289,7 +312,8 @@ export default function HostScreen({ onLeave }: { onLeave: () => void }) {
             ['playback_state', playbackState],
             ['sync_status',    syncStatus],
             ['position',       pos.toFixed(2) + 's'],
-            ['segment',        `${currentSegment} / ${HOST_TRACKS.length - 1}`],
+            ['segment',        `${currentSegment} / ${SCRIPT.length - 1}`],
+            ['my_line',        tts.isMyLine ? 'yes (speaking)' : 'no (silent)'],
             ['my_slider',      String(mySliderValue)],
             ['partner_slider', String(partnerSliderValue)],
             ['partner_conn',   String(partnerConnected)],

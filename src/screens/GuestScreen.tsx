@@ -1,8 +1,8 @@
-import React, { useEffect, useCallback } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { useSessionStore } from '../store/sessionStore';
 import { useSync } from '../hooks/useSync';
-import { useAudio } from '../hooks/useAudio';
-import { GUEST_TRACKS } from '../tracks';
+import { useTTS } from '../hooks/useTTS';
+import { SCRIPT } from '../script';
 
 const SYNC_CONFIG = {
   disconnected: { color: '#FF4444', label: 'Disconnected' },
@@ -48,35 +48,37 @@ export default function GuestScreen({ onLeave }: { onLeave: () => void }) {
     currentSegment, setCurrentSegment,
   } = useSessionStore();
 
-  const audio = useAudio(GUEST_TRACKS, currentSegment);
+  // Guest never auto-advances (host drives timing) — no onSegmentEnd
+  const tts = useTTS(currentSegment, 'guest');
 
   const { sendSlider, registerGetPosition } = useSync({
     roomCode,
     role: 'guest',
     onPlay: useCallback((pos: number) => {
-      audio.play(pos); setPlaybackState('playing'); setCurrentPosition(pos);
+      tts.play(pos); setPlaybackState('playing'); setCurrentPosition(pos);
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []),
     onPause: useCallback((pos: number) => {
-      audio.pause(); setPlaybackState('paused'); setCurrentPosition(pos);
+      tts.pause(); setPlaybackState('paused'); setCurrentPosition(pos);
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []),
     onSeek: useCallback((pos: number) => {
-      audio.seek(pos); setCurrentPosition(pos);
+      tts.seek(pos); setCurrentPosition(pos);
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []),
     onHeartbeat: useCallback((corrected: number) => {
-      audio.seek(corrected); setCurrentPosition(corrected);
+      // Drift correction — just update position (TTS timing is host-driven)
+      setCurrentPosition(corrected);
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []),
     onNextSegment: useCallback((segment: number) => {
-      audio.pause(); setCurrentSegment(segment); setPlaybackState('paused'); setCurrentPosition(0);
+      tts.pause(); setCurrentSegment(segment); setPlaybackState('paused'); setCurrentPosition(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []),
   });
 
-  useEffect(() => { registerGetPosition(audio.getPosition); }, [registerGetPosition, audio.getPosition]);
-  useEffect(() => { setCurrentPosition(audio.currentPosition); }, [audio.currentPosition]);
+  useEffect(() => { registerGetPosition(tts.getPosition); }, [registerGetPosition, tts.getPosition]);
+  useEffect(() => { setCurrentPosition(tts.currentPosition); }, [tts.currentPosition, setCurrentPosition]);
 
   const handleSlider = useCallback((value: number) => {
     setMySliderValue(value); sendSlider(value);
@@ -84,9 +86,7 @@ export default function GuestScreen({ onLeave }: { onLeave: () => void }) {
 
   const syncCfg       = SYNC_CONFIG[syncStatus];
   const combinedScore = Math.round((mySliderValue + partnerSliderValue) / 2);
-  const pos           = audio.currentPosition;
-  const maxDur        = Math.max(audio.duration || (GUEST_TRACKS[currentSegment]?.durationHint ?? 120), pos + 1);
-  const currentTrack  = GUEST_TRACKS[currentSegment];
+  const pos           = tts.currentPosition;
 
   return (
     <div style={s.root}>
@@ -127,9 +127,9 @@ export default function GuestScreen({ onLeave }: { onLeave: () => void }) {
           </div>
           <div style={s.statsRow}>
             {[
-              { k: 'Segment', v: `${currentSegment + 1} / ${GUEST_TRACKS.length}` },
+              { k: 'Line',     v: `${currentSegment + 1} / ${SCRIPT.length}` },
               { k: 'Position', v: fmt(pos) },
-              { k: 'Role', v: 'Guest' },
+              { k: 'Role',     v: 'Guest (Girl)' },
             ].map(({ k, v }, i, a) => (
               <React.Fragment key={k}>
                 <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
@@ -142,31 +142,53 @@ export default function GuestScreen({ onLeave }: { onLeave: () => void }) {
           </div>
         </div>
 
-        {/* Now Playing */}
+        {/* Current Line */}
         <div style={card}>
           <span style={ct}>Now Playing</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{ width: 44, height: 44, borderRadius: 10, backgroundColor: '#1A1A2E',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, flexShrink: 0 }}>
-              🎧
-            </div>
-            <div>
-              <div style={{ color: '#FFF', fontWeight: 700, fontSize: 15 }}>
-                {currentTrack?.title ?? 'No track loaded'}
-              </div>
-              <div style={{ color: '#6B6B8A', fontSize: 12, marginTop: 2 }}>
-                {currentTrack?.url ? 'Real audio loaded' : 'Simulated — add track URL in tracks.ts'}
-              </div>
+
+          {/* Speaker badge */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+            <div style={{
+              padding: '4px 12px', borderRadius: 20, fontSize: 11, fontWeight: 700, letterSpacing: 1,
+              backgroundColor: tts.isMyLine ? '#EC489920' : '#A855F720',
+              color:            tts.isMyLine ? '#EC4899'   : '#A855F7',
+              border: `1px solid ${tts.isMyLine ? '#EC4899' : '#A855F7'}`,
+            }}>
+              {tts.lineSpeaker ?? '—'}
+              {tts.isMyLine ? ' · Your line' : ' · Partner\'s line'}
             </div>
           </div>
-          {/* Segment dots */}
-          <div style={{ display: 'flex', gap: 6, marginTop: 14, justifyContent: 'center' }}>
-            {GUEST_TRACKS.map((_, i) => (
-              <div key={i} style={{
-                width: 8, height: 8, borderRadius: '50%',
-                backgroundColor: i === currentSegment ? '#EC4899'
-                  : i < currentSegment ? '#EC489950' : '#2A2A3A',
-              }} />
+
+          {/* Line text */}
+          <div style={{
+            backgroundColor: '#0B0B14', borderRadius: 12, padding: '16px 18px',
+            marginBottom: 14, borderLeft: `3px solid ${tts.isMyLine ? '#EC4899' : '#A855F7'}`,
+          }}>
+            <span style={{ color: tts.isMyLine ? '#FFF' : '#9A9AB0', fontSize: 15, lineHeight: 1.6, fontStyle: 'italic' }}>
+              "{tts.lineText}"
+            </span>
+          </div>
+
+          {/* Line progress dots (read-only for guest) */}
+          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+            {SCRIPT.map((ln, i) => (
+              <div key={i} title={`Line ${i + 1}: ${ln.speaker}`}
+                style={{
+                  width: 28, height: 28, borderRadius: 8, fontSize: 10, fontWeight: 700,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  border: `1px solid ${i === currentSegment
+                    ? (ln.role === 'guest' ? '#EC4899' : '#A855F7')
+                    : '#2A2A3A'}`,
+                  backgroundColor: i === currentSegment
+                    ? (ln.role === 'guest' ? '#EC489920' : '#A855F720')
+                    : i < currentSegment ? '#1A1A2E' : 'transparent',
+                  color: i === currentSegment
+                    ? (ln.role === 'guest' ? '#EC4899' : '#A855F7')
+                    : i < currentSegment ? '#4A4A6A' : '#2A2A4A',
+                }}
+              >
+                {i + 1}
+              </div>
             ))}
           </div>
         </div>
@@ -175,11 +197,11 @@ export default function GuestScreen({ onLeave }: { onLeave: () => void }) {
         <div style={card}>
           <span style={ct}>Playback</span>
           <div style={{ marginBottom: 14 }}>
-            <input type="range" min={0} max={maxDur} step={0.1} value={pos} readOnly
+            <input type="range" min={0} max={tts.duration} step={0.1} value={pos} readOnly
               style={{ width: '100%', accentColor: '#EC4899', cursor: 'default' }} />
             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2 }}>
               <span style={s.timeLabel}>{fmt(pos)}</span>
-              <span style={s.timeLabel}>{audio.duration ? fmt(audio.duration) : fmt(GUEST_TRACKS[currentSegment]?.durationHint ?? 0)}</span>
+              <span style={s.timeLabel}>{fmt(tts.duration)}</span>
             </div>
           </div>
           <div style={{ backgroundColor: '#1A1A2E', borderRadius: 16, padding: '16px 0', textAlign: 'center',
@@ -223,7 +245,8 @@ export default function GuestScreen({ onLeave }: { onLeave: () => void }) {
             ['playback_state', playbackState],
             ['sync_status',    syncStatus],
             ['position',       pos.toFixed(2) + 's'],
-            ['segment',        `${currentSegment} / ${GUEST_TRACKS.length - 1}`],
+            ['segment',        `${currentSegment} / ${SCRIPT.length - 1}`],
+            ['my_line',        tts.isMyLine ? 'yes (speaking)' : 'no (silent)'],
             ['my_slider',      String(mySliderValue)],
             ['partner_slider', String(partnerSliderValue)],
             ['partner_conn',   String(partnerConnected)],
