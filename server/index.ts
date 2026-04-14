@@ -1,3 +1,5 @@
+import dotenv from 'dotenv';
+dotenv.config({ override: true }); // must be first — .env values override OS env vars
 import express, { Request, Response, NextFunction } from 'express';
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -22,16 +24,26 @@ import {
 const JWT_SECRET    = process.env.JWT_SECRET    ?? 'rolescene-dev-secret-change-in-prod';
 const JWT_EXPIRES   = '7d';
 const BCRYPT_ROUNDS = 10;
-const ADMIN_CODE    = process.env.ADMIN_CODE;
+const ADMIN_CODE    = process.env.ADMIN_CODE === 'disabled' ? undefined : process.env.ADMIN_CODE;
 const FRONTEND_URL  = process.env.FRONTEND_URL  ?? 'http://localhost:3000';
 
 // Nodemailer — Gmail SMTP
-const EMAIL_USER = process.env.EMAIL_USER ?? '';
-const EMAIL_PASS = process.env.EMAIL_PASS ?? '';
+const EMAIL_HOST     = process.env.EMAIL_HOST     ?? 'smtp.gmail.com';
+const EMAIL_PORT     = parseInt(process.env.EMAIL_PORT ?? '587', 10);
+const EMAIL_USER     = process.env.EMAIL_USER     ?? '';
+const EMAIL_PASSWORD = process.env.EMAIL_PASSWORD ?? '';
+const EMAIL_FROM     = process.env.EMAIL_FROM
+  ? (process.env.EMAIL_FROM.includes('@') && !process.env.EMAIL_FROM.includes('<')
+      ? `RoleScene <${process.env.EMAIL_FROM}>`  // plain email → wrap with name
+      : process.env.EMAIL_FROM)                   // already formatted
+  : `RoleScene <${EMAIL_USER}>`;
 
 const mailer = nodemailer.createTransport({
-  service: 'gmail',
-  auth: { user: EMAIL_USER, pass: EMAIL_PASS },
+  host:   EMAIL_HOST,
+  port:   EMAIL_PORT,
+  secure: EMAIL_PORT === 465, // true for 465, false for 587 (STARTTLS)
+  auth:   { user: EMAIL_USER, pass: EMAIL_PASSWORD },
+  tls:    { rejectUnauthorized: false }, // allows self-signed certs in dev
 });
 
 // Lockout policy
@@ -60,14 +72,14 @@ function generateToken(): string {
 async function sendVerificationEmail(email: string, displayName: string, token: string): Promise<void> {
   const verifyUrl = `${FRONTEND_URL}?verify=${token}`;
 
-  if (!EMAIL_USER || !EMAIL_PASS) {
+  if (!EMAIL_USER || !EMAIL_PASSWORD) {
     // Dev fallback: print link to console when email is not configured
     console.log(`\n  [DEV] Verification link for ${email}:\n  ${verifyUrl}\n`);
     return;
   }
 
   await mailer.sendMail({
-    from:    `"RoleScene" <${EMAIL_USER}>`,
+    from:    EMAIL_FROM,
     to:      email,
     subject: 'Verify your RoleScene account',
     html: `
@@ -247,7 +259,7 @@ app.post('/api/auth/register', authRateLimit, async (req: Request, res: Response
     try {
       await sendVerificationEmail(email, displayName, verToken);
     } catch (err) {
-      console.error('SendGrid error:', err);
+      console.error('[EMAIL] Failed to send verification email:', err);
       // Don't block registration if email fails — user can resend
     }
     res.status(201).json({
@@ -311,7 +323,7 @@ app.post('/api/auth/resend-verification', authRateLimit, async (req: Request, re
   try {
     await sendVerificationEmail(email, user.display_name, verToken);
   } catch (err) {
-    console.error('SendGrid error:', err);
+    console.error('[EMAIL] Failed to send verification email:', err);
   }
 
   res.json({ message: 'If your email is registered and unverified, a new link has been sent.' });
@@ -557,6 +569,20 @@ wss.on('connection', (ws, req) => {
 // ── Start ─────────────────────────────────────────────────────────────────
 
 const PORT = parseInt(process.env.PORT ?? '3001', 10);
-httpServer.listen(PORT, () =>
-  console.log(`\n  RoleScene server  →  http://localhost:${PORT}\n`)
-);
+httpServer.listen(PORT, () => {
+  console.log(`\n  RoleScene server  →  http://localhost:${PORT}\n`);
+
+  // Verify SMTP connection on startup so misconfiguration is caught immediately
+  if (EMAIL_USER && EMAIL_PASSWORD) {
+    mailer.verify((err) => {
+      if (err) {
+        console.error('  [EMAIL] SMTP connection FAILED:', err.message);
+        console.error('  [EMAIL] Emails will not be sent. Check EMAIL_USER / EMAIL_PASSWORD in .env\n');
+      } else {
+        console.log(`  [EMAIL] SMTP ready — sending from ${EMAIL_FROM}\n`);
+      }
+    });
+  } else {
+    console.log('  [EMAIL] No credentials set — verification links will print to console\n');
+  }
+});
