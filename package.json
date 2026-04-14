@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "concurrently -n server,client -c cyan,magenta \"npm run dev:server\" \"npm run dev:client\"",
     "dev:client": "vite",
-    "dev:server": "tsx watch server/index.ts",
+    "dev:server": "tsx watch --env-file=.env server/index.ts",
+    "start": "npx tsx server/index.ts",
     "build": "vite build",
     "preview": "vite preview"
   },
@@ -14,6 +15,7 @@
     "bcryptjs": "^2.4.3",
     "better-sqlite3": "^11.9.1",
     "cors": "^2.8.5",
+    "dotenv": "^17.4.2",
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.3",
     "nodemailer": "^8.0.5",
