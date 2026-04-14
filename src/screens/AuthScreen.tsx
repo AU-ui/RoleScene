@@ -6,6 +6,7 @@
  */
 import React, { useState, useCallback } from 'react';
 import { useAuthStore, type AuthUser } from '../store/authStore';
+import { apiUrl } from '../lib/api';
 
 type Tab = 'login' | 'register';
 
@@ -101,7 +102,7 @@ export default function AuthScreen({ onAuth, onBack, onNeedsVerification, initia
 
     setLoading(true); setServerError('');
     try {
-      const res  = await fetch('/api/auth/login', {
+      const res  = await fetch(apiUrl('/api/auth/login'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim(), password }),
@@ -136,7 +137,7 @@ export default function AuthScreen({ onAuth, onBack, onNeedsVerification, initia
       };
       if (adminCode.trim()) body.adminCode = adminCode.trim();
 
-      const res  = await fetch('/api/auth/register', {
+      const res  = await fetch(apiUrl('/api/auth/register'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),

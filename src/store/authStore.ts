@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { apiUrl } from '../lib/api';
 
 export type UserRole = 'user' | 'admin';
 
@@ -51,7 +52,8 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
 /** Attach Bearer token to fetch calls automatically. */
 export function authFetch(input: RequestInfo, init: RequestInit = {}): Promise<Response> {
   const token = useAuthStore.getState().token;
-  return fetch(input, {
+  const url = typeof input === 'string' ? apiUrl(input) : input;
+  return fetch(url, {
     ...init,
     headers: {
       'Content-Type': 'application/json',

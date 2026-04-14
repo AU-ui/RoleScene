@@ -3,6 +3,7 @@
  * Tells the user to check their inbox and offers a resend button.
  */
 import React, { useState } from 'react';
+import { apiUrl } from '../lib/api';
 
 interface Props {
   email: string;
@@ -17,7 +18,7 @@ export default function VerifyEmailScreen({ email, onBack }: Props) {
   async function handleResend() {
     setLoading(true); setError(''); setResent(false);
     try {
-      const res = await fetch('/api/auth/resend-verification', {
+      const res = await fetch(apiUrl('/api/auth/resend-verification'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email }),

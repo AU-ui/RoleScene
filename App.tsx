@@ -28,6 +28,7 @@ import GuestScreen        from './src/screens/GuestScreen';
 import { useSessionStore } from './src/store/sessionStore';
 import { useAuthStore }    from './src/store/authStore';
 import type { UserRole }   from './src/store/authStore';
+import { apiUrl }          from './src/lib/api';
 
 type View = 'marketing' | 'auth' | 'verify' | 'verified' | 'dashboard' | 'admin' | 'host' | 'guest';
 
@@ -93,7 +94,7 @@ export default function App() {
     // Remove token from URL immediately (clean up address bar)
     window.history.replaceState({}, '', window.location.pathname);
 
-    fetch(`/api/auth/verify?token=${encodeURIComponent(verifyToken)}`)
+    fetch(apiUrl(`/api/auth/verify?token=${encodeURIComponent(verifyToken)}`))
       .then(r => r.json())
       .then((data: { token?: string; user?: { id: string; email: string; displayName: string; role: UserRole }; error?: string }) => {
         if (data.token && data.user) {

@@ -7,10 +7,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { useSessionStore } from '../store/sessionStore';
 import type { ClientMsg, ServerMsg, Role } from '../types';
-
-const WS_BASE = import.meta.env.DEV
-  ? 'ws://localhost:3001'
-  : `ws://${window.location.host}`;
+import { WS_BASE } from '../lib/api';
 
 const DRIFT_THRESHOLD = 0.15; // 150 ms
 
