@@ -1,0 +1,15 @@
+FROM node:20-alpine
+
+# Build tools needed for better-sqlite3 native module
+RUN apk add --no-cache python3 make g++
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci
+
+COPY . .
+
+EXPOSE 3001
+
+CMD ["npx", "tsx", "server/index.ts"]

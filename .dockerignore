@@ -1,0 +1,7 @@
+node_modules
+.env
+rolescene.db
+rolescene.db-shm
+rolescene.db-wal
+dist
+web-build
