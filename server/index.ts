@@ -172,6 +172,8 @@ app.use(cors({
     if (allowed.includes(origin)) return cb(null, true);
     // Also allow any vercel.app preview deployments
     if (origin.endsWith('.vercel.app')) return cb(null, true);
+    // Allow ngrok tunnels for local dev
+    if (origin.endsWith('.ngrok-free.dev') || origin.endsWith('.ngrok-free.app') || origin.endsWith('.ngrok.io')) return cb(null, true);
     cb(new Error(`CORS: origin ${origin} not allowed`));
   },
   credentials: true,

@@ -48,13 +48,13 @@ function VerifiedSplash({ onDone }: { onDone: () => void }) {
 
   return (
     <div style={{
-      minHeight: '100vh', backgroundColor: '#0B0B14',
+      minHeight: '100vh', backgroundColor: '#080401',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
     }}>
       <div style={{
-        textAlign: 'center', backgroundColor: '#13131F',
+        textAlign: 'center', backgroundColor: '#160C05',
         borderRadius: 20, padding: '56px 48px',
-        border: '1px solid #1E1E30', maxWidth: 400, width: '100%',
+        border: '1px solid #3A1A08', maxWidth: 400, width: '100%',
       }}>
         <div style={{
           width: 72, height: 72, borderRadius: '50%',
@@ -62,10 +62,10 @@ function VerifiedSplash({ onDone }: { onDone: () => void }) {
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           fontSize: 36, margin: '0 auto 24px',
         }}>✅</div>
-        <h1 style={{ color: '#FFF', fontSize: 24, fontWeight: 800, marginBottom: 12 }}>
+        <h1 style={{ color: '#F5EDD8', fontSize: 24, fontWeight: 800, marginBottom: 12 }}>
           Email verified!
         </h1>
-        <p style={{ color: '#6B6B8A', fontSize: 14, marginBottom: 0 }}>
+        <p style={{ color: '#7A5535', fontSize: 14, marginBottom: 0 }}>
           Your account is now active. Taking you to your dashboard…
         </p>
       </div>

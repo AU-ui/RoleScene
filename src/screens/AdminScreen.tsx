@@ -159,8 +159,8 @@ export default function AdminScreen({ onLeave }: Props) {
         ) : (
           <>
             <div style={s.statsRow}>
-              <StatCard label="Total Users"     value={stats?.userCount    ?? 0} color="#A855F7" />
-              <StatCard label="Total Sessions"  value={stats?.sessionCount ?? 0} color="#EC4899" />
+              <StatCard label="Total Users"     value={stats?.userCount    ?? 0} color="#D4A017" />
+              <StatCard label="Total Sessions"  value={stats?.sessionCount ?? 0} color="#C87020" />
               <StatCard label="Active Rooms"    value={stats?.activeRooms  ?? 0} color="#00C896" />
             </div>
 
@@ -200,9 +200,9 @@ export default function AdminScreen({ onLeave }: Props) {
                         <td style={s.td}>
                           <span style={{
                             ...s.rolePill,
-                            backgroundColor: u.role === 'admin' ? '#F59E0B20' : '#A855F720',
-                            color:           u.role === 'admin' ? '#F59E0B'   : '#A855F7',
-                            borderColor:     u.role === 'admin' ? '#F59E0B'   : '#A855F7',
+                            backgroundColor: u.role === 'admin' ? '#D4A01720' : '#C8860A20',
+                            color:           u.role === 'admin' ? '#D4A017'   : '#C8860A',
+                            borderColor:     u.role === 'admin' ? '#D4A017'   : '#C8860A',
                           }}>
                             {u.role.toUpperCase()}
                           </span>
@@ -257,7 +257,7 @@ export default function AdminScreen({ onLeave }: Props) {
                   <tbody>
                     {sessions.map(sess => (
                       <tr key={sess.id} style={s.tr}>
-                        <td style={{ ...s.td, fontFamily: 'monospace', fontWeight: 700, letterSpacing: 3, color: '#A855F7' }}>
+                        <td style={{ ...s.td, fontFamily: 'monospace', fontWeight: 700, letterSpacing: 3, color: '#D4A017' }}>
                           {sess.room_code}
                         </td>
                         <td style={s.td}>
@@ -299,16 +299,16 @@ export default function AdminScreen({ onLeave }: Props) {
 // ── Styles ─────────────────────────────────────────────────────────────────
 
 const s: Record<string, React.CSSProperties> = {
-  root: { minHeight: '100vh', backgroundColor: '#0B0B14', color: '#FFF' },
+  root: { minHeight: '100vh', backgroundColor: '#080401', color: '#F5EDD8' },
   container: { maxWidth: 1100, margin: '0 auto', padding: '0 24px 60px' },
 
   // Header
   header: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
     padding: '24px 0', marginBottom: 32,
-    borderBottom: '1px solid #1E1E30',
+    borderBottom: '1px solid #3A1A08',
   },
-  logo: { fontSize: 22, fontWeight: 800, letterSpacing: 0.5 },
+  logo: { fontSize: 22, fontWeight: 800, letterSpacing: 0.5, color: '#E8B84B' },
   headerRight: { display: 'flex', alignItems: 'center', gap: 12 },
   avatar: {
     width: 36, height: 36, borderRadius: '50%',
@@ -316,20 +316,20 @@ const s: Record<string, React.CSSProperties> = {
     fontSize: 15, fontWeight: 700, flexShrink: 0,
   },
   userInfo: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start' },
-  userName: { color: '#FFF', fontSize: 13, fontWeight: 600 },
+  userName: { color: '#F5EDD8', fontSize: 13, fontWeight: 600 },
   adminBadgeInline: {
     backgroundColor: '#F59E0B20', border: '1px solid #F59E0B',
     borderRadius: 10, color: '#F59E0B', fontSize: 9,
     fontWeight: 700, padding: '2px 8px', letterSpacing: 2,
   },
   leaveBtn: {
-    backgroundColor: 'transparent', border: '1px solid #2A2A3A',
-    borderRadius: 8, color: '#A855F7', fontSize: 12,
+    backgroundColor: 'transparent', border: '1px solid #4A2810',
+    borderRadius: 8, color: '#D4A017', fontSize: 12,
     padding: '6px 14px', cursor: 'pointer',
   },
   logoutBtn: {
-    backgroundColor: 'transparent', border: '1px solid #2A2A3A',
-    borderRadius: 8, color: '#6B6B8A', fontSize: 12,
+    backgroundColor: 'transparent', border: '1px solid #4A2810',
+    borderRadius: 8, color: '#7A5535', fontSize: 12,
     padding: '6px 14px', cursor: 'pointer',
   },
 
@@ -341,47 +341,47 @@ const s: Record<string, React.CSSProperties> = {
     gap: 16, marginBottom: 32,
   },
   statCard: {
-    backgroundColor: '#13131F', borderRadius: 16,
-    padding: '24px 28px', border: '1px solid #1E1E30',
+    backgroundColor: '#160C05', borderRadius: 16,
+    padding: '24px 28px', border: '1px solid #3A1A08',
     textAlign: 'center',
   },
   statValue: { fontSize: 40, fontWeight: 800, marginBottom: 6 },
-  statLabel: { color: '#6B6B8A', fontSize: 13, fontWeight: 600 },
+  statLabel: { color: '#7A5535', fontSize: 13, fontWeight: 600 },
 
   // Tabs
   tabs: {
     display: 'flex', gap: 8, alignItems: 'center', marginBottom: 20,
   },
   tabBtn: {
-    backgroundColor: 'transparent', border: '1px solid #2A2A3A',
-    borderRadius: 10, color: '#6B6B8A', fontSize: 13,
+    backgroundColor: 'transparent', border: '1px solid #4A2810',
+    borderRadius: 10, color: '#7A5535', fontSize: 13,
     fontWeight: 600, padding: '9px 20px', cursor: 'pointer',
   },
   tabActive: {
-    backgroundColor: '#1E1E30', color: '#FFF', borderColor: '#3A3A5A',
+    backgroundColor: '#2A1208', color: '#F5EDD8', borderColor: '#6B3A10',
   },
   refreshBtn: {
-    marginLeft: 'auto', backgroundColor: 'transparent', border: '1px solid #2A2A3A',
-    borderRadius: 10, color: '#6B6B8A', fontSize: 12,
+    marginLeft: 'auto', backgroundColor: 'transparent', border: '1px solid #4A2810',
+    borderRadius: 10, color: '#7A5535', fontSize: 12,
     padding: '9px 16px', cursor: 'pointer',
   },
 
   // Table
   tableWrap: {
-    overflowX: 'auto', backgroundColor: '#13131F',
-    borderRadius: 16, border: '1px solid #1E1E30',
+    overflowX: 'auto', backgroundColor: '#160C05',
+    borderRadius: 16, border: '1px solid #3A1A08',
   },
   table: {
     width: '100%', borderCollapse: 'collapse',
   },
   th: {
     padding: '14px 20px', textAlign: 'left',
-    color: '#6B6B8A', fontSize: 11, fontWeight: 700,
+    color: '#7A5535', fontSize: 11, fontWeight: 700,
     letterSpacing: 1, textTransform: 'uppercase',
-    borderBottom: '1px solid #1E1E30',
+    borderBottom: '1px solid #3A1A08',
   },
-  tr: { borderBottom: '1px solid #1E1E3050' },
-  td: { padding: '14px 20px', fontSize: 13, color: '#DDD', verticalAlign: 'middle' },
+  tr: { borderBottom: '1px solid #3A1A0840' },
+  td: { padding: '14px 20px', fontSize: 13, color: '#D4B896', verticalAlign: 'middle' },
 
   rolePill: {
     display: 'inline-block', border: '1px solid',
@@ -396,7 +396,7 @@ const s: Record<string, React.CSSProperties> = {
   },
 
   // Misc
-  loadingText: { color: '#6B6B8A', textAlign: 'center', padding: '60px 0', fontSize: 16 },
+  loadingText: { color: '#7A5535', textAlign: 'center', padding: '60px 0', fontSize: 16 },
   errorBox: {
     backgroundColor: '#FF44441A', border: '1px solid #FF444440',
     borderRadius: 12, padding: '16px 20px',

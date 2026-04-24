@@ -78,15 +78,16 @@ export function useTTS(
       utter.pitch    = role === 'host' ? 0.85 : 1.15;
       utter.volume   = 1;
 
-      // Try to pick a matching voice
+      // Pick a non-American voice when possible, matching the role's gender
       const voices = window.speechSynthesis.getVoices();
       if (voices.length > 0) {
-        const preferred = voices.find(v =>
-          role === 'host'
-            ? /male|man|guy/i.test(v.name) && !/fe/i.test(v.name)
-            : /female|woman|girl/i.test(v.name),
-        );
-        if (preferred) utter.voice = preferred;
+        // Prefer British/Australian/Indian English for a less robotic feel
+        const nonUS = voices.filter(v => /en[-_](GB|AU|IN|IE)/i.test(v.lang));
+        const pool  = nonUS.length > 0 ? nonUS : voices.filter(v => /^en/i.test(v.lang));
+        const pick  = role === 'host'
+          ? pool.find(v => !/female|woman|girl/i.test(v.name)) ?? pool[0]
+          : pool.find(v => /female|woman|girl/i.test(v.name))  ?? pool[pool.length - 1];
+        if (pick) utter.voice = pick;
       }
 
       window.speechSynthesis.speak(utter);

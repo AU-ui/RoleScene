@@ -228,7 +228,7 @@ export default function AuthScreen({ onAuth, onBack, onNeedsVerification, initia
               </button>
 
               <button type="button" style={s.switchLink} onClick={() => switchTab('register')}>
-                Don't have an account? <span style={{ color: '#A855F7' }}>Create one</span>
+                Don't have an account? <span style={{ color: '#D4A017' }}>Create one</span>
               </button>
             </form>
 
@@ -272,7 +272,7 @@ export default function AuthScreen({ onAuth, onBack, onNeedsVerification, initia
                     {[1, 2, 3].map(lvl => (
                       <div key={lvl} style={{
                         flex: 1, height: 3, borderRadius: 2,
-                        backgroundColor: strength.level >= lvl ? strength.color : '#2A2A3A',
+                        backgroundColor: strength.level >= lvl ? strength.color : '#3A1A08',
                         transition: 'background-color 0.2s',
                       }} />
                     ))}
@@ -312,13 +312,18 @@ export default function AuthScreen({ onAuth, onBack, onNeedsVerification, initia
               </button>
 
               <button type="button" style={s.switchLink} onClick={() => switchTab('login')}>
-                Already have an account? <span style={{ color: '#EC4899' }}>Sign in</span>
+                Already have an account? <span style={{ color: '#C87020' }}>Sign in</span>
               </button>
             </form>
           )}
         </div>
 
         <div style={s.hint}>Your session is encrypted and stored locally.</div>
+
+        <img src="/one.jpeg" alt="" style={{
+          width: '100%', borderRadius: 18, objectFit: 'cover', maxHeight: 200,
+          opacity: 0.7, marginTop: 8,
+        }} />
       </div>
     </div>
   );
@@ -328,59 +333,59 @@ export default function AuthScreen({ onAuth, onBack, onNeedsVerification, initia
 
 const s: Record<string, React.CSSProperties> = {
   root: {
-    minHeight: '100vh', backgroundColor: '#0B0B14',
+    minHeight: '100vh', backgroundColor: '#080401',
     display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
   },
   container: { width: '100%', maxWidth: 420, display: 'flex', flexDirection: 'column', gap: 16 },
   backBtn: {
-    background: 'none', border: 'none', color: '#6B6B8A', fontSize: 13,
+    background: 'none', border: 'none', color: '#7A5535', fontSize: 13,
     cursor: 'pointer', textAlign: 'left', padding: 0, marginBottom: 4,
   },
   logo: { textAlign: 'center', marginBottom: 8, display: 'flex', flexDirection: 'column', gap: 6 },
-  logoText: { fontSize: 36, fontWeight: 800, color: '#FFFFFF', letterSpacing: 1 },
-  logoSub:  { color: '#6B6B8A', fontSize: 13 },
+  logoText: { fontSize: 36, fontWeight: 800, color: '#E8B84B', letterSpacing: 1 },
+  logoSub:  { color: '#7A5535', fontSize: 13 },
   tabs: {
-    display: 'flex', backgroundColor: '#13131F', borderRadius: 14,
-    padding: 4, border: '1px solid #1E1E30',
+    display: 'flex', backgroundColor: '#160C05', borderRadius: 14,
+    padding: 4, border: '1px solid #3A1A08',
   },
   tab: {
     flex: 1, padding: '10px 0', borderRadius: 11, border: 'none',
-    background: 'transparent', color: '#6B6B8A', fontWeight: 600, fontSize: 14, cursor: 'pointer',
+    background: 'transparent', color: '#7A5535', fontWeight: 600, fontSize: 14, cursor: 'pointer',
   },
-  tabActive: { backgroundColor: '#1E1E30', color: '#FFF' },
-  card: { backgroundColor: '#13131F', borderRadius: 18, padding: 24, border: '1px solid #1E1E30' },
+  tabActive: { backgroundColor: '#2A1208', color: '#F5EDD8' },
+  card: { backgroundColor: '#160C05', borderRadius: 18, padding: 24, border: '1px solid #3A1A08' },
   form: { display: 'flex', flexDirection: 'column', gap: 0 },
-  cardTitle: { color: '#FFF', fontWeight: 700, fontSize: 18, marginBottom: 4 },
-  cardSub:   { color: '#6B6B8A', fontSize: 13, marginBottom: 20 },
+  cardTitle: { color: '#F5EDD8', fontWeight: 700, fontSize: 18, marginBottom: 4 },
+  cardSub:   { color: '#7A5535', fontSize: 13, marginBottom: 20 },
   label: {
-    color: '#9999BB', fontSize: 12, fontWeight: 600, letterSpacing: 0.5,
+    color: '#9B7A58', fontSize: 12, fontWeight: 600, letterSpacing: 0.5,
     marginBottom: 6, display: 'block',
   },
   input: {
-    backgroundColor: '#0B0B14', border: '1px solid #2A2A3A', borderRadius: 12,
-    padding: '13px 16px', color: '#FFF', fontSize: 15, width: '100%',
+    backgroundColor: '#0D0501', border: '1px solid #4A2810', borderRadius: 12,
+    padding: '13px 16px', color: '#F5EDD8', fontSize: 15, width: '100%',
     outline: 'none', marginBottom: 4, fontFamily: 'inherit',
   },
   inputErr: { border: '1px solid #FF4444' },
   fieldErr: { color: '#FF6666', fontSize: 11, marginBottom: 12, display: 'block' },
   btn: {
     borderRadius: 12, padding: '14px 0', width: '100%', border: 'none',
-    cursor: 'pointer', fontWeight: 700, fontSize: 15, color: '#FFF', marginTop: 4,
+    cursor: 'pointer', fontWeight: 700, fontSize: 15, color: '#FFF5E0', marginTop: 4,
   },
-  btnPurple: { backgroundColor: '#A855F7' },
-  btnPink:   { backgroundColor: '#EC4899' },
+  btnPurple: { background: 'linear-gradient(135deg,#D4A017,#8B4A05)' },
+  btnPink:   { background: 'linear-gradient(135deg,#C87020,#6B3A05)' },
   error: {
     backgroundColor: '#FF44441A', border: '1px solid #FF444440', borderRadius: 10,
     padding: '10px 14px', color: '#FF6666', fontSize: 13, textAlign: 'center', marginBottom: 12,
   },
   switchLink: {
-    background: 'none', border: 'none', color: '#6B6B8A', fontSize: 13,
+    background: 'none', border: 'none', color: '#7A5535', fontSize: 13,
     cursor: 'pointer', marginTop: 16, textAlign: 'center', width: '100%',
     padding: 0, fontFamily: 'inherit',
   },
   adminToggle: {
-    background: 'none', border: 'none', color: '#4A4A6A', fontSize: 11,
+    background: 'none', border: 'none', color: '#4A2810', fontSize: 11,
     cursor: 'pointer', textAlign: 'left', padding: 0, marginBottom: 4, fontFamily: 'inherit',
   },
-  hint: { color: '#444460', fontSize: 11, textAlign: 'center' },
+  hint: { color: '#5A3A18', fontSize: 11, textAlign: 'center' },
 };

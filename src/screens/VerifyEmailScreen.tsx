@@ -53,7 +53,7 @@ export default function VerifyEmailScreen({ email, onBack }: Props) {
         <div style={s.emailChip}>{email}</div>
         <p style={s.sub}>
           Click the link in that email to activate your account.
-          The link expires in <strong style={{ color: '#FFF' }}>24 hours</strong>.
+          The link expires in <strong style={{ color: '#F5EDD8' }}>24 hours</strong>.
         </p>
 
         {/* Resend */}
@@ -87,42 +87,42 @@ export default function VerifyEmailScreen({ email, onBack }: Props) {
 
 const s: Record<string, React.CSSProperties> = {
   root: {
-    minHeight: '100vh', backgroundColor: '#0B0B14',
+    minHeight: '100vh', backgroundColor: '#080401',
     display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
   },
   container: {
     width: '100%', maxWidth: 440,
-    backgroundColor: '#13131F', borderRadius: 20,
-    border: '1px solid #1E1E30', padding: '48px 40px',
+    backgroundColor: '#160C05', borderRadius: 20,
+    border: '1px solid #3A1A08', padding: '48px 40px',
     display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0,
     textAlign: 'center',
   },
   iconWrap: {
     width: 72, height: 72, borderRadius: '50%',
-    backgroundColor: '#A855F715', border: '1px solid #A855F730',
+    backgroundColor: '#C8860A15', border: '1px solid #C8860A30',
     display: 'flex', alignItems: 'center', justifyContent: 'center',
     fontSize: 36, marginBottom: 24,
   },
   icon: {},
-  title: { color: '#FFF', fontSize: 24, fontWeight: 800, margin: '0 0 12px' },
-  sub:   { color: '#6B6B8A', fontSize: 14, lineHeight: 1.6, margin: '0 0 12px' },
+  title: { color: '#F5EDD8', fontSize: 24, fontWeight: 800, margin: '0 0 12px' },
+  sub:   { color: '#7A5535', fontSize: 14, lineHeight: 1.6, margin: '0 0 12px' },
   emailChip: {
-    backgroundColor: '#0B0B14', border: '1px solid #2A2A3A',
+    backgroundColor: '#0D0501', border: '1px solid #4A2810',
     borderRadius: 10, padding: '10px 20px',
-    color: '#A855F7', fontSize: 14, fontWeight: 700,
+    color: '#D4A017', fontSize: 14, fontWeight: 700,
     letterSpacing: 0.5, marginBottom: 16,
   },
-  hint: { color: '#444460', fontSize: 12, margin: '16px 0 8px' },
+  hint: { color: '#5A3A18', fontSize: 12, margin: '16px 0 8px' },
   resendBtn: {
-    backgroundColor: 'transparent', border: '1px solid #A855F7',
-    borderRadius: 12, color: '#A855F7', fontSize: 14,
+    backgroundColor: 'transparent', border: '1px solid #C8860A',
+    borderRadius: 12, color: '#D4A017', fontSize: 14,
     fontWeight: 600, padding: '12px 28px',
     cursor: 'pointer', width: '100%', fontFamily: 'inherit',
     marginBottom: 16,
   },
   backBtn: {
     background: 'none', border: 'none',
-    color: '#6B6B8A', fontSize: 13, cursor: 'pointer',
+    color: '#7A5535', fontSize: 13, cursor: 'pointer',
     marginTop: 8, fontFamily: 'inherit',
   },
   success: {
