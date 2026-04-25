@@ -166,6 +166,8 @@ const app = express();
 app.use(helmet({
   contentSecurityPolicy: false,       // managed by frontend CDN (Vercel)
   crossOriginEmbedderPolicy: false,   // not needed for API-only responses
+  crossOriginResourcePolicy: false,   // API server must allow cross-origin fetch
+  crossOriginOpenerPolicy: false,     // not needed for API-only responses
 }));
 
 app.use(cors({
