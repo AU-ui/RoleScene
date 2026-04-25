@@ -4,10 +4,12 @@ import express, { Request, Response, NextFunction } from 'express';
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import cors from 'cors';
+import helmet from 'helmet';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { randomBytes } from 'crypto';
 import nodemailer from 'nodemailer';
+import { db } from './db.js';
 import {
   createSession, getSessionByCode, getAllSessions, getSessionById,
   getSessionCount, deleteSessionById,
@@ -43,7 +45,7 @@ const mailer = nodemailer.createTransport({
   port:   EMAIL_PORT,
   secure: EMAIL_PORT === 465, // true for 465, false for 587 (STARTTLS)
   auth:   { user: EMAIL_USER, pass: EMAIL_PASSWORD },
-  tls:    { rejectUnauthorized: false }, // allows self-signed certs in dev
+  tls:    process.env.NODE_ENV === 'production' ? undefined : { rejectUnauthorized: false },
 });
 
 // Lockout policy
@@ -159,6 +161,13 @@ setInterval(() => {
 // ── Express ───────────────────────────────────────────────────────────────
 
 const app = express();
+
+// ── Security headers ──────────────────────────────────────────────────────
+app.use(helmet({
+  contentSecurityPolicy: false,       // managed by frontend CDN (Vercel)
+  crossOriginEmbedderPolicy: false,   // not needed for API-only responses
+}));
+
 app.use(cors({
   origin: (origin, cb) => {
     // Allow requests with no origin (mobile apps, curl, server-to-server)
@@ -475,7 +484,18 @@ app.delete('/api/admin/sessions/:id', requireAdmin, (req: Request, res: Response
 // ── WebSocket ─────────────────────────────────────────────────────────────
 
 const httpServer = createServer(app);
-const wss = new WebSocketServer({ server: httpServer });
+const wss = new WebSocketServer({ server: httpServer, maxPayload: 512 });
+
+// Per-connection message rate limit: max 30 messages / second
+const wsRates = new Map<WebSocket, { count: number; resetAt: number }>();
+function isWsRateLimited(ws: WebSocket): boolean {
+  const now = Date.now();
+  const e = wsRates.get(ws);
+  if (!e || now > e.resetAt) { wsRates.set(ws, { count: 1, resetAt: now + 1000 }); return false; }
+  if (e.count >= 30) return true;
+  e.count++;
+  return false;
+}
 
 interface RoomPeer { host: WebSocket | null; guest: WebSocket | null }
 const rooms = new Map<string, RoomPeer>();
@@ -492,9 +512,20 @@ function send(ws: WebSocket | null, msg: object) {
 wss.on('connection', (ws, req) => {
   if (!req.url) { ws.close(); return; }
 
-  const url  = new URL(req.url, 'http://localhost');
-  const code = url.searchParams.get('roomCode');
-  const role = url.searchParams.get('role') as 'host' | 'guest' | null;
+  const url   = new URL(req.url, 'http://localhost');
+  const code  = url.searchParams.get('roomCode');
+  const role  = url.searchParams.get('role') as 'host' | 'guest' | null;
+  const token = url.searchParams.get('token');
+
+  // ── Auth: require valid JWT ──────────────────────────────────────────────
+  if (!token) { ws.close(4003, 'Authentication required'); return; }
+  let wsUserId: string;
+  try {
+    const payload = jwt.verify(token, JWT_SECRET) as { sub: string; role: UserRole };
+    wsUserId = payload.sub;
+  } catch {
+    ws.close(4003, 'Invalid or expired token'); return;
+  }
 
   if (!code || !/^\d{6}$/.test(code) || (role !== 'host' && role !== 'guest')) {
     ws.close(4000, 'Missing or invalid roomCode / role'); return;
@@ -502,6 +533,11 @@ wss.on('connection', (ws, req) => {
 
   const session = getSessionByCode(code);
   if (!session) { ws.close(4001, 'Session not found'); return; }
+
+  // ── Host ownership: only the session creator may connect as host ──────────
+  if (role === 'host' && session.host_id && session.host_id !== wsUserId) {
+    ws.close(4004, 'Not authorized for host role'); return;
+  }
 
   const room = getRoom(code);
 
@@ -523,45 +559,53 @@ wss.on('connection', (ws, req) => {
   }
 
   ws.on('message', (raw) => {
+    // ── Drop oversized or rate-exceeded messages ───────────────────────────
+    if (raw.toString().length > 512) return;
+    if (isWsRateLimited(ws)) return;
+
     let msg: Record<string, unknown>;
     try { msg = JSON.parse(raw.toString()); } catch { return; }
 
     const partner = role === 'host' ? room.guest : room.host;
     const now = Date.now();
 
+    // Clamp numeric values to safe bounds
+    const safePos = (v: unknown) => Math.min(3600, Math.max(0, Number(v ?? 0) || 0));
+    const safeSeg = (v: unknown) => Math.min(99,   Math.max(0, Math.floor(Number(v ?? 0) || 0)));
+
     switch (msg.type) {
       case 'play': {
-        const pos = Number(msg.position ?? 0);
+        const pos = safePos(msg.position);
         updatePlayback(code, 'playing', pos, now);
         send(partner, { type: 'play', position: pos, serverTimestamp: now });
         break;
       }
       case 'pause': {
-        const pos = Number(msg.position ?? 0);
+        const pos = safePos(msg.position);
         updatePlayback(code, 'paused', pos, now);
         send(partner, { type: 'pause', position: pos });
         break;
       }
       case 'seek': {
-        const pos = Number(msg.position ?? 0);
+        const pos = safePos(msg.position);
         send(partner, { type: 'seek', position: pos, serverTimestamp: now });
         break;
       }
       case 'heartbeat': {
-        const pos = Number(msg.position ?? 0);
+        const pos = safePos(msg.position);
         updatePlayback(code, 'playing', pos, now);
         if (role === 'host') send(room.guest, { type: 'heartbeat', position: pos, serverTimestamp: now });
         break;
       }
       case 'slider': {
-        const value = Math.min(10, Math.max(1, Number(msg.value ?? 5)));
+        const value = Math.min(10, Math.max(1, Number(msg.value ?? 5) || 5));
         updateSlider(code, role, value);
         send(partner, { type: 'partner_slider', value });
         break;
       }
       case 'next_segment': {
         if (role !== 'host') break;
-        const segment = Number(msg.segment ?? 0);
+        const segment = safeSeg(msg.segment);
         updateSegment(code, segment);
         updatePlayback(code, 'paused', 0, now);
         send(room.guest, { type: 'next_segment', segment });
@@ -571,6 +615,7 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('close', () => {
+    wsRates.delete(ws);
     if (role === 'host') room.host = null;
     else                 room.guest = null;
     const partner = role === 'host' ? room.guest : room.host;
@@ -579,10 +624,17 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.onerror = () => {
+    wsRates.delete(ws);
     if (role === 'host') room.host = null;
     else                 room.guest = null;
   };
 });
+
+// ── Stale session cleanup (runs every hour, deletes sessions > 48 h old) ──
+setInterval(() => {
+  const cutoff = Math.floor(Date.now() / 1000) - 48 * 60 * 60;
+  db.prepare('DELETE FROM sessions WHERE created_at < ?').run(cutoff);
+}, 60 * 60 * 1000);
 
 // ── Start ─────────────────────────────────────────────────────────────────
 

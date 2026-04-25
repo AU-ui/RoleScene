@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef } from 'react';
 import { useSessionStore } from '../store/sessionStore';
+import { useAuthStore } from '../store/authStore';
 import { useSync } from '../hooks/useSync';
 import { useTTS } from '../hooks/useTTS';
 import { SCRIPT } from '../script';
@@ -24,9 +25,12 @@ export default function GuestScreen({ onLeave }: { onLeave: () => void }) {
   const ttsPauseRef = useRef<() => void>(() => {});
   const ttsSeekRef  = useRef<(pos: number) => void>(() => {});
 
+  const token = useAuthStore((s) => s.token) ?? '';
+
   const { sendSlider, registerGetPosition } = useSync({
     roomCode,
     role: 'guest',
+    token,
     onPlay:        (pos) => { ttsPlayRef.current(pos);  setPlaybackState('playing'); setCurrentPosition(pos); },
     onPause:       (pos) => { ttsPauseRef.current();    setPlaybackState('paused');  setCurrentPosition(pos); },
     onSeek:        (pos) => { ttsSeekRef.current(pos);  setCurrentPosition(pos); },

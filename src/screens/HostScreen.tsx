@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef } from 'react';
 import { useSessionStore } from '../store/sessionStore';
+import { useAuthStore } from '../store/authStore';
 import { useSync } from '../hooks/useSync';
 import { useTTS } from '../hooks/useTTS';
 import { SCRIPT } from '../script';
@@ -19,6 +20,8 @@ export default function HostScreen({ onLeave }: { onLeave: () => void }) {
     currentSegment, setCurrentSegment,
   } = useSessionStore();
 
+  const token = useAuthStore((s) => s.token) ?? '';
+
   // Refs to break circular hook dependency
   const ttsPlayRef        = useRef<(pos: number) => void>(() => {});
   const ttsPauseRef       = useRef<() => void>(() => {});
@@ -29,6 +32,7 @@ export default function HostScreen({ onLeave }: { onLeave: () => void }) {
     useSync({
       roomCode,
       role: 'host',
+      token,
       onPlay:        (pos) => { ttsPlayRef.current(pos);  setPlaybackState('playing'); },
       onPause:       (pos) => { ttsPauseRef.current();    setCurrentPosition(pos);     },
       onSeek:        (pos) => { ttsSeekRef.current(pos);  setCurrentPosition(pos);     },

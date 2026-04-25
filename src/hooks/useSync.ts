@@ -22,10 +22,11 @@ interface SyncCallbacks {
 interface UseSyncOptions extends SyncCallbacks {
   roomCode: string;
   role: Role;
+  token: string;
 }
 
 export function useSync({
-  roomCode, role,
+  roomCode, role, token,
   onPlay, onPause, onSeek, onHeartbeat, onNextSegment,
 }: UseSyncOptions) {
   const wsRef          = useRef<WebSocket | null>(null);
@@ -57,7 +58,7 @@ export function useSync({
 
     storeRef.current.setSyncStatus('connecting');
 
-    const ws = new WebSocket(`${WS_BASE}?roomCode=${roomCode}&role=${role}`);
+    const ws = new WebSocket(`${WS_BASE}?roomCode=${roomCode}&role=${role}&token=${encodeURIComponent(token)}`);
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -157,7 +158,7 @@ export function useSync({
     };
 
     ws.onerror = () => storeRef.current.setSyncStatus('disconnected');
-  }, [roomCode, role, sendMsg]);
+  }, [roomCode, role, token, sendMsg]);
 
   useEffect(() => {
     mountedRef.current = true;
